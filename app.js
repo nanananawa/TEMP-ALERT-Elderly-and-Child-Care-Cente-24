@@ -2,7 +2,7 @@
 // ระบบศูนย์ดูแลผู้สูงอายุแบบแบ่งห้องพัก (Elderly Care Center / Nursing Home Dashboard)
 
 const LOCAL_STORAGE_KEY = 'eldercare_center_state_v3';
-const DEFAULT_FIREBASE_URL = 'https://babyteam-parent-default-rtdb.asia-southeast1.firebasedatabase.app';
+const DEFAULT_FIREBASE_URL = 'https://temp-alert-elderly-and-c-4b008-default-rtdb.asia-southeast1.firebasedatabase.app';
 
 const TURN_POSITIONS = [
   'นอนหงาย',
@@ -214,7 +214,11 @@ function loadState() {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed.rooms) && parsed.rooms.length > 0) state.rooms = parsed.rooms;
       if (parsed.selectedRoomId) state.selectedRoomId = parsed.selectedRoomId;
-      if (parsed.firebaseUrl) state.firebaseUrl = parsed.firebaseUrl;
+      if (parsed.firebaseUrl && !parsed.firebaseUrl.includes('babyteam-parent-default-rtdb') && !parsed.firebaseUrl.includes('babytemp-9beab')) {
+        state.firebaseUrl = parsed.firebaseUrl;
+      } else {
+        state.firebaseUrl = DEFAULT_FIREBASE_URL;
+      }
       if (typeof parsed.soundEnabled !== 'undefined') state.soundEnabled = parsed.soundEnabled;
       if (typeof parsed.sirenEnabled !== 'undefined') state.sirenEnabled = parsed.sirenEnabled;
       if (parsed.emergencyContact) state.emergencyContact = { ...state.emergencyContact, ...parsed.emergencyContact };
