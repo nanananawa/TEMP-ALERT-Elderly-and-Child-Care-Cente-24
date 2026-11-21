@@ -546,6 +546,9 @@ function renderRoomsGrid() {
           <button class="btn-room-action log" onclick="openAddCareLogModal('${r.id}')" title="เขียนบันทึกการดูแลสำหรับห้องนี้">
             ✍️ บันทึก
           </button>
+          <button class="btn-room-action doc" onclick="openDoctorReferralModal('${r.id}')" title="ส่งข้อมูลผู้ป่วยห้องนี้หาหมอ">
+            🩺 หาหมอ
+          </button>
           <button class="btn-room-action sos" onclick="triggerRoomSos('${r.id}')" title="กดส่งสัญญาณฉุกเฉิน">
             🚨
           </button>
@@ -1549,6 +1552,481 @@ function shareActiveRoomDoctorReport() {
   closeRoomDetailModal();
   switchTab('logs');
   copyDoctorReport();
+}
+
+// ==========================================
+// Medical Referral & Send Patient to Doctor
+// ==========================================
+function openDoctorReferralModal(preselectedRoomId) {
+  const roomSelect = document.getElementById('docRefRoomSelect');
+  if (roomSelect) {
+    let opts = '';
+    state.rooms.forEach(r => {
+      opts += `<option value="${r.id}">${escapeHtml(r.roomNo)} - ${escapeHtml(r.name)} (${r.hn})</option>`;
+    });
+    roomSelect.innerHTML = opts;
+
+    if (preselectedRoomId) {
+      roomSelect.value = preselectedRoomId;
+    } else if (state.selectedRoomId) {
+      roomSelect.value = state.selectedRoomId;
+    }
+  }
+
+  // Load saved doctor & nurse names
+  const docInput = document.getElementById('docRefDoctorName');
+  if (docInput) {
+    docInput.value = localStorage.getItem('eldercare_doctor_target') || 'แพทย์ประจำศูนย์ / รพ.เครือข่าย';
+  }
+
+  const nurseInput = document.getElementById('docRefNurseName');
+  if (nurseInput) {
+    const savedStaff = localStorage.getItem('eldercare_staff_name') || 'พยาบาลเวร';
+    const shift = getShiftLabel(getCurrentShift()).split(' ')[0];
+    nurseInput.value = `${savedStaff} (${shift})`;
+  }
+
+  // Default chief complaint
+  const targetRoom = getSelectedDoctorReferralRoom();
+  const complaintInput = document.getElementById('docRefChiefComplaint');
+  if (complaintInput) {
+    if (targetRoom && targetRoom.temp >= 38.0) {
+      complaintInput.value = '🚨 มีไข้สูงเฉียบพลัน (>38°C) หนาวสั่น ซึมลง';
+    } else if (targetRoom && targetRoom.vitals && targetRoom.vitals.bpSys >= 150) {
+      complaintInput.value = '🫀 ความดันโลหิตสูงวิกฤต (>150 mmHg) ปวดศีรษะ';
+    } else if (!complaintInput.value) {
+      complaintInput.value = '📋 ปรึกษาอาการและรายงานสุขภาพตามรอบการดูแล';
+    }
+  }
+
+  renderDoctorReferralPatientStrip();
+  updateDoctorReferralPreview();
+
+  document.getElementById('modalDoctorReferral').classList.add('active');
+}
+
+function closeDoctorReferralModal() {
+  document.getElementById('modalDoctorReferral').classList.remove('active');
+}
+
+function getSelectedDoctorReferralRoom() {
+  const roomSelect = document.getElementById('docRefRoomSelect');
+  const roomId = roomSelect ? roomSelect.value : state.selectedRoomId;
+  return state.rooms.find(r => r.id === roomId) || state.rooms[0];
+}
+
+function onDoctorReferralRoomChange(roomId) {
+  renderDoctorReferralPatientStrip();
+  updateDoctorReferralPreview();
+}
+
+function setDocRefChiefComplaint(complaintText) {
+  const complaintInput = document.getElementById('docRefChiefComplaint');
+  if (complaintInput) {
+    complaintInput.value = complaintText;
+    updateDoctorReferralPreview();
+  }
+}
+
+function renderDoctorReferralPatientStrip() {
+  const room = getSelectedDoctorReferralRoom();
+  if (!room) return;
+
+  const strip = document.getElementById('docRefPatientStrip');
+  const vitalsGrid = document.getElementById('docRefVitalsGrid');
+  const v = room.vitals || { bpSys: 120, bpDia: 80, pulse: 72, spo2: 98, glucose: 100 };
+
+  const careTagMap = {
+    bedridden: 'ติดเตียง 100%',
+    semi: 'กึ่งติดเตียง',
+    self: 'ช่วยเหลือตัวเองได้'
+  };
+
+  if (strip) {
+    strip.innerHTML = `
+      <div>
+        <div style="font-size: 1.05rem; font-weight: 800; color: #0f172a;">
+          ${escapeHtml(room.roomNo)} - ${escapeHtml(room.name)}
+          <span class="room-number-badge" style="font-size: 0.75rem; margin-left: 6px;">${escapeHtml(room.hn)}</span>
+        </div>
+        <div style="font-size: 0.78rem; color: #475569; margin-top: 2px;">
+          อายุ ${escapeHtml(room.age)} • นน. ${room.weight.toFixed(1)} กก. • <strong>${careTagMap[room.careLevel] || 'ผู้สูงอายุ'}</strong>
+        </div>
+        <div style="font-size: 0.75rem; color: #b45309; margin-top: 2px;">
+          โรคประจำตัว: ${escapeHtml(room.condition || 'ไม่มีระบุ')}
+        </div>
+      </div>
+      <div style="text-align: right;">
+        <span class="care-level-tag ${room.careLevel}">${careTagMap[room.careLevel] || 'ผู้สูงอายุ'}</span>
+        <div style="font-size: 0.72rem; color: #15803d; font-weight: 700; margin-top: 4px;">📡 ${escapeHtml(room.deviceId)} (🔋 ${room.battery}%)</div>
+      </div>
+    `;
+  }
+
+  if (vitalsGrid) {
+    const isTempAlert = room.temp >= 37.5 || room.temp < 35.5;
+    const isBpAlert = v.bpSys >= 140 || v.bpSys < 90;
+    const isSpo2Alert = v.spo2 < 95;
+
+    vitalsGrid.innerHTML = `
+      <div class="referral-vital-item">
+        <div class="referral-vital-lbl">🌡️ อุณหภูมิ</div>
+        <div class="referral-vital-val ${isTempAlert ? 'alert' : ''}">${room.temp.toFixed(1)} °C</div>
+        <div style="font-size: 0.65rem; color: ${isTempAlert ? '#dc2626' : '#15803d'}; font-weight: 700;">
+          ${room.temp >= 38.0 ? '🚨 มีไข้สูง' : (room.temp >= 37.3 ? '● มีไข้ต่ำ' : '● ปกติ')}
+        </div>
+      </div>
+      <div class="referral-vital-item">
+        <div class="referral-vital-lbl">🫀 ความดัน (BP)</div>
+        <div class="referral-vital-val ${isBpAlert ? 'alert' : ''}">${v.bpSys}/${v.bpDia}</div>
+        <div style="font-size: 0.65rem; color: ${isBpAlert ? '#dc2626' : '#64748b'};">mmHg</div>
+      </div>
+      <div class="referral-vital-item">
+        <div class="referral-vital-lbl">💓 ชีพจร (Pulse)</div>
+        <div class="referral-vital-val">${v.pulse}</div>
+        <div style="font-size: 0.65rem; color: #64748b;">bpm</div>
+      </div>
+      <div class="referral-vital-item">
+        <div class="referral-vital-lbl">🫁 ออกซิเจน (SpO2)</div>
+        <div class="referral-vital-val ${isSpo2Alert ? 'alert' : ''}">${v.spo2}%</div>
+        <div style="font-size: 0.65rem; color: ${isSpo2Alert ? '#dc2626' : '#64748b'};">${isSpo2Alert ? '⚠️ ออกซิเจนต่ำ' : '● ปกติ'}</div>
+      </div>
+      <div class="referral-vital-item">
+        <div class="referral-vital-lbl">🩸 น้ำตาล (DTX)</div>
+        <div class="referral-vital-val">${v.glucose}</div>
+        <div style="font-size: 0.65rem; color: #64748b;">mg/dL</div>
+      </div>
+    `;
+  }
+}
+
+function generateDoctorReferralText() {
+  const room = getSelectedDoctorReferralRoom();
+  if (!room) return '';
+
+  const complaint = (document.getElementById('docRefChiefComplaint')?.value || '').trim() || 'ปรึกษาอาการทั่วไปและส่งต่อข้อมูลสุขภาพ';
+  const nurseNotes = (document.getElementById('docRefNurseNotes')?.value || '').trim();
+  const doctorName = (document.getElementById('docRefDoctorName')?.value || '').trim() || 'แพทย์ประจำศูนย์ / รพ.เครือข่าย';
+  const nurseName = (document.getElementById('docRefNurseName')?.value || '').trim() || 'พยาบาลเวร';
+
+  const v = room.vitals || { bpSys: 120, bpDia: 80, pulse: 72, spo2: 98, glucose: 100 };
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' });
+  const timeStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+
+  const careTagMap = {
+    bedridden: 'ผู้ป่วยติดเตียง 100%',
+    semi: 'กึ่งติดเตียง',
+    self: 'ช่วยเหลือตัวเองได้'
+  };
+
+  let tempAlert = '';
+  if (room.temp >= 38.0) tempAlert = ' (🚨 มีไข้สูงเสี่ยงติดเชื้อ)';
+  else if (room.temp >= 37.3) tempAlert = ' (● มีไข้ต่ำ)';
+  else if (room.temp < 35.5) tempAlert = ' (⚠️ ตัวเย็นผิดปกติ)';
+
+  let bpAlert = '';
+  if (v.bpSys >= 160 || v.bpDia >= 100) bpAlert = ' (🚨 ความดันสูงวิกฤต)';
+  else if (v.bpSys >= 140) bpAlert = ' (⚠️ ความดันค่อนข้างสูง)';
+
+  let spo2Alert = '';
+  if (v.spo2 < 95) spo2Alert = ' (⚠️ ออกซิเจนต่ำกว่าเกณฑ์)';
+
+  // Format medications
+  let medsText = 'ไม่มีข้อมูลยา';
+  if (room.medications && room.medications.length > 0) {
+    medsText = room.medications.map((m, idx) => `  ${idx + 1}. ${m.name} (${m.desc || ''})${m.takenToday ? ' [✔ ทานแล้ว]' : ''}`).join('\n');
+  }
+
+  // Format recent care activities
+  const roomLogs = state.centerLogs.filter(l => l.roomId === room.id || l.roomNo === room.roomNo);
+  let logsText = 'ไม่มีบันทึกเพิ่มเติม';
+  if (roomLogs.length > 0) {
+    logsText = roomLogs.slice(0, 3).map(l => `  • [${l.time}] ${l.title}: ${l.note || ''}${l.staff ? ` (${l.staff})` : ''}`).join('\n');
+  }
+
+  let text = `🏥 [ใบส่งต่อผู้ป่วย / ปรึกษาแพทย์ (Medical Referral)]\n`;
+  text += `ศูนย์ดูแลผู้สูงอายุ ElderCare 24\n`;
+  text += `───────────────────────\n`;
+  text += `👤 ข้อมูลผู้ป่วย:\n`;
+  text += `• ผู้สูงอายุ: ${room.name} (${room.age}) | HN: ${room.hn}\n`;
+  text += `• ห้องพัก: ${room.roomNo} | นน.: ${room.weight.toFixed(1)} กก.\n`;
+  text += `• ระดับการดูแล: ${careTagMap[room.careLevel] || 'ผู้สูงอายุ'}\n`;
+  text += `• โรคประจำตัว: ${room.condition || 'ไม่มีระบุ'}\n`;
+  text += `• ประวัติแพ้ยา: ปฏิเสธประวัติแพ้ยา\n\n`;
+
+  text += `🚨 เหตุผลที่ปรึกษาแพทย์ (Chief Complaint / SBAR):\n`;
+  text += `${complaint}\n\n`;
+
+  text += `🫀 สัญญาณชีพล่าสุด (Live Vitals):\n`;
+  text += `• อุณหภูมิ: ${room.temp.toFixed(1)} °C${tempAlert}\n`;
+  text += `• ความดันโลหิต (BP): ${v.bpSys}/${v.bpDia} mmHg${bpAlert}\n`;
+  text += `• ชีพจร (Pulse): ${v.pulse} bpm\n`;
+  text += `• ออกซิเจน (SpO2): ${v.spo2} %${spo2Alert}\n`;
+  text += `• น้ำตาลปลายนิ้ว (DTX): ${v.glucose} mg/dL\n`;
+  text += `• ปริมาณน้ำที่ดื่มวันนี้: ${room.hydration ? room.hydration.todayMl : 0} ml\n\n`;
+
+  text += `💊 รายการยาประจำตัวปัจจุบัน:\n`;
+  text += `${medsText}\n\n`;
+
+  if (nurseNotes) {
+    text += `📝 อาการสังเกต & การดูแลเบื้องต้นที่ดำเนินการไปแล้ว:\n`;
+    text += `${nurseNotes}\n\n`;
+  }
+
+  text += `🕒 บันทึกการดูแลล่าสุดวันนี้:\n`;
+  text += `${logsText}\n\n`;
+
+  text += `───────────────────────\n`;
+  text += `👨‍⚕️ ส่งถึง: ${doctorName}\n`;
+  text += `👩‍⚕️ ผู้ส่งข้อมูล: ${nurseName}\n`;
+  text += `📞 เบอร์โทรศูนย์: ${state.emergencyContact ? state.emergencyContact.phone : '1669'}\n`;
+  text += `📅 วันที่ส่งข้อมูล: ${dateStr} เวลา ${timeStr} น.`;
+
+  return text;
+}
+
+function updateDoctorReferralPreview() {
+  const box = document.getElementById('docRefPreviewBox');
+  if (box) {
+    box.value = generateDoctorReferralText();
+  }
+}
+
+function sendDoctorReferralViaLine() {
+  const text = generateDoctorReferralText();
+  if (!text) return;
+
+  const docName = document.getElementById('docRefDoctorName')?.value || '';
+  if (docName) localStorage.setItem('eldercare_doctor_target', docName);
+
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).catch(() => {});
+  }
+
+  const lineUrl = `https://line.me/R/msg/text/?${encodeURIComponent(text)}`;
+  window.open(lineUrl, '_blank');
+
+  syncDoctorReferralToFirebase(false);
+  showToast('📲 เปิดแอป LINE และคัดลอกข้อมูลผู้ป่วยเรียบร้อย!');
+}
+
+function copyDoctorReferralText() {
+  const box = document.getElementById('docRefPreviewBox');
+  if (!box) return;
+  box.select();
+  box.setSelectionRange(0, 99999);
+
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(box.value).then(() => {
+      showToast('📋 คัดลอกข้อมูลส่งต่อแพทย์เรียบร้อย! สามารถวางส่งใน LINE ได้ทันที');
+    }).catch(() => {
+      document.execCommand('copy');
+      showToast('📋 คัดลอกข้อมูลเรียบร้อย!');
+    });
+  } else {
+    document.execCommand('copy');
+    showToast('📋 คัดลอกข้อมูลเรียบร้อย!');
+  }
+}
+
+function sendDoctorReferralViaEmail() {
+  const room = getSelectedDoctorReferralRoom();
+  const text = generateDoctorReferralText();
+  const subject = `[ใบส่งต่อผู้ป่วย] ${room ? room.roomNo : ''} ${room ? room.name : ''} (${room ? room.hn : ''})`;
+  const mailUrl = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`;
+  window.location.href = mailUrl;
+  showToast('✉️ กำลังเปิดโปรแกรมอีเมล...');
+}
+
+function printDoctorReferralSheet() {
+  const room = getSelectedDoctorReferralRoom();
+  if (!room) return;
+
+  const complaint = (document.getElementById('docRefChiefComplaint')?.value || '').trim() || 'ปรึกษาอาการทั่วไปและส่งต่อข้อมูลสุขภาพ';
+  const nurseNotes = (document.getElementById('docRefNurseNotes')?.value || '').trim();
+  const doctorName = (document.getElementById('docRefDoctorName')?.value || '').trim() || 'แพทย์ประจำศูนย์ / รพ.เครือข่าย';
+  const nurseName = (document.getElementById('docRefNurseName')?.value || '').trim() || 'พยาบาลเวร';
+
+  const v = room.vitals || { bpSys: 120, bpDia: 80, pulse: 72, spo2: 98, glucose: 100 };
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+  const timeStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+
+  const careTagMap = {
+    bedridden: 'ผู้ป่วยติดเตียง 100%',
+    semi: 'กึ่งติดเตียง',
+    self: 'ช่วยเหลือตัวเองได้'
+  };
+
+  let medsRows = '';
+  if (room.medications && room.medications.length > 0) {
+    room.medications.forEach((m, idx) => {
+      medsRows += `<tr><td style="padding:4px 8px;border:1px solid #ccc;text-align:center;">${idx + 1}</td><td style="padding:4px 8px;border:1px solid #ccc;">${escapeHtml(m.name)}</td><td style="padding:4px 8px;border:1px solid #ccc;">${escapeHtml(m.desc || '-')}</td><td style="padding:4px 8px;border:1px solid #ccc;text-align:center;">${m.takenToday ? '✔ ทานแล้ว' : 'ยังไม่ถึงเวลา'}</td></tr>`;
+    });
+  } else {
+    medsRows = `<tr><td colspan="4" style="padding:8px;border:1px solid #ccc;text-align:center;color:#666;">ไม่มีประวัติยาประจำตัว</td></tr>`;
+  }
+
+  const printEl = document.getElementById('printableReferralSlip');
+  if (!printEl) return;
+
+  printEl.innerHTML = `
+    <div style="font-family: 'Sarabun', 'Noto Sans Thai', sans-serif; line-height: 1.5; color: #000000; max-width: 800px; margin: 0 auto;">
+      <div style="border-bottom: 2px solid #000; padding-bottom: 12px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-end;">
+        <div>
+          <div style="font-size: 1.4rem; font-weight: 800;">🏢 ศูนย์ดูแลผู้สูงอายุ ElderCare 24 (Nursing Home)</div>
+          <div style="font-size: 0.9rem; color: #333;">ใบส่งต่อผู้ป่วยและรายงานสุขภาพสำหรับแพทย์ (Medical Referral & Patient Transfer Slip)</div>
+        </div>
+        <div style="text-align: right; font-size: 0.85rem;">
+          <div><strong>วันที่ส่ง:</strong> ${dateStr}</div>
+          <div><strong>เวลา:</strong> ${timeStr} น.</div>
+        </div>
+      </div>
+
+      <div style="background: #f4f4f4; border: 1px solid #ccc; padding: 12px; border-radius: 6px; margin-bottom: 14px;">
+        <table style="width: 100%; font-size: 0.9rem; border-collapse: collapse;">
+          <tr>
+            <td style="width: 50%;"><strong>ห้องพัก:</strong> ${escapeHtml(room.roomNo)}</td>
+            <td style="width: 50%;"><strong>เลขประจำตัวผู้ป่วย (HN):</strong> ${escapeHtml(room.hn)}</td>
+          </tr>
+          <tr>
+            <td><strong>ชื่อ-นามสกุล:</strong> ${escapeHtml(room.name)}</td>
+            <td><strong>อายุ:</strong> ${escapeHtml(room.age)} | <strong>น้ำหนัก:</strong> ${room.weight.toFixed(1)} กก.</td>
+          </tr>
+          <tr>
+            <td><strong>ระดับการดูแล:</strong> ${careTagMap[room.careLevel] || 'ผู้สูงอายุ'}</td>
+            <td><strong>ประวัติแพ้ยา:</strong> <span style="color: #b91c1c; font-weight: 700;">ปฏิเสธประวัติแพ้ยา</span></td>
+          </tr>
+          <tr>
+            <td colspan="2"><strong>โรคประจำตัว:</strong> ${escapeHtml(room.condition || 'ไม่มีระบุ')}</td>
+          </tr>
+        </table>
+      </div>
+
+      <div style="margin-bottom: 14px;">
+        <div style="font-weight: 800; font-size: 1rem; border-bottom: 1px solid #000; padding-bottom: 4px; margin-bottom: 6px;">
+          🚨 เหตุผลที่ปรึกษาแพทย์ / อาการสำคัญ (Chief Complaint):
+        </div>
+        <div style="padding: 8px 12px; background: #fff5f5; border: 1px solid #fed7d7; border-radius: 6px; font-weight: 700; color: #9b2c2c;">
+          ${escapeHtml(complaint)}
+        </div>
+      </div>
+
+      <div style="margin-bottom: 14px;">
+        <div style="font-weight: 800; font-size: 1rem; border-bottom: 1px solid #000; padding-bottom: 4px; margin-bottom: 6px;">
+          🫀 สัญญาณชีพล่าสุด (Live Vital Signs):
+        </div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem; border: 1px solid #ccc; text-align: center;">
+          <tr style="background: #e2e8f0; font-weight: 700;">
+            <th style="padding: 6px; border: 1px solid #ccc;">อุณหภูมิร่างกาย</th>
+            <th style="padding: 6px; border: 1px solid #ccc;">ความดันโลหิต (BP)</th>
+            <th style="padding: 6px; border: 1px solid #ccc;">ชีพจร (Pulse)</th>
+            <th style="padding: 6px; border: 1px solid #ccc;">ออกซิเจน (SpO2)</th>
+            <th style="padding: 6px; border: 1px solid #ccc;">น้ำตาล (DTX)</th>
+          </tr>
+          <tr style="font-size: 1rem; font-weight: 800;">
+            <td style="padding: 8px; border: 1px solid #ccc; color:${room.temp >= 38 ? '#c53030' : '#000'};">${room.temp.toFixed(1)} °C</td>
+            <td style="padding: 8px; border: 1px solid #ccc;">${v.bpSys}/${v.bpDia} mmHg</td>
+            <td style="padding: 8px; border: 1px solid #ccc;">${v.pulse} bpm</td>
+            <td style="padding: 8px; border: 1px solid #ccc; color:${v.spo2 < 95 ? '#c53030' : '#000'};">${v.spo2}%</td>
+            <td style="padding: 8px; border: 1px solid #ccc;">${v.glucose} mg/dL</td>
+          </tr>
+        </table>
+      </div>
+
+      <div style="margin-bottom: 14px;">
+        <div style="font-weight: 800; font-size: 1rem; border-bottom: 1px solid #000; padding-bottom: 4px; margin-bottom: 6px;">
+          💊 รายการยาประจำตัวปัจจุบัน:
+        </div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; border: 1px solid #ccc;">
+          <tr style="background: #e2e8f0; font-weight: 700;">
+            <th style="width: 40px; padding: 4px; border: 1px solid #ccc;">#</th>
+            <th style="padding: 4px 8px; border: 1px solid #ccc;">ชื่อยา</th>
+            <th style="padding: 4px 8px; border: 1px solid #ccc;">วิธีรับประทาน</th>
+            <th style="padding: 4px 8px; border: 1px solid #ccc;">สถานะวันนี้</th>
+          </tr>
+          ${medsRows}
+        </table>
+      </div>
+
+      ${nurseNotes ? `
+        <div style="margin-bottom: 14px;">
+          <div style="font-weight: 800; font-size: 1rem; border-bottom: 1px solid #000; padding-bottom: 4px; margin-bottom: 6px;">
+            📝 รายละเอียดอาการเพิ่มเติม & การดูแลเบื้องต้น:
+          </div>
+          <div style="padding: 8px 12px; background: #fafafa; border: 1px solid #eee; border-radius: 6px; font-size: 0.9rem;">
+            ${escapeHtml(nurseNotes)}
+          </div>
+        </div>
+      ` : ''}
+
+      <div style="margin-top: 36px; display: flex; justify-content: space-between; font-size: 0.9rem;">
+        <div style="text-align: center; width: 45%;">
+          <div>ลงชื่อ ................................................................ ผู้ส่งข้อมูล</div>
+          <div style="margin-top: 4px;">( ${escapeHtml(nurseName)} )</div>
+          <div style="color: #666; font-size: 0.8rem; margin-top: 2px;">พยาบาล / เจ้าหน้าที่ศูนย์ดูแลผู้สูงอายุ</div>
+        </div>
+        <div style="text-align: center; width: 45%;">
+          <div>ลงชื่อ ................................................................ แพทย์ผู้รับส่งต่อ</div>
+          <div style="margin-top: 4px;">( ${escapeHtml(doctorName)} )</div>
+          <div style="color: #666; font-size: 0.8rem; margin-top: 2px;">ความเห็นแพทย์ / คำสั่งการรักษา</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  window.print();
+}
+
+async function syncDoctorReferralToFirebase(showToastMsg = true) {
+  const room = getSelectedDoctorReferralRoom();
+  if (!room) return;
+
+  const complaint = (document.getElementById('docRefChiefComplaint')?.value || '').trim() || 'ปรึกษาอาการและสุขภาพ';
+  const nurseNotes = (document.getElementById('docRefNurseNotes')?.value || '').trim();
+  const doctorName = (document.getElementById('docRefDoctorName')?.value || '').trim() || 'แพทย์ประจำศูนย์';
+  const nurseName = (document.getElementById('docRefNurseName')?.value || '').trim() || 'พยาบาลเวร';
+  const v = room.vitals || {};
+
+  const referralData = {
+    id: 'ref_' + Date.now(),
+    roomId: room.id,
+    roomNo: room.roomNo,
+    patientName: room.name,
+    age: room.age,
+    hn: room.hn,
+    careLevel: room.careLevel,
+    temp: room.temp,
+    vitals: v,
+    chiefComplaint: complaint,
+    nurseNotes: nurseNotes,
+    doctorName: doctorName,
+    nurseName: nurseName,
+    status: 'pending_doctor_review',
+    timestamp: Date.now(),
+    createdAt: new Date().toISOString()
+  };
+
+  addCenterLog({
+    type: 'alert',
+    roomNo: room.roomNo,
+    residentName: room.name,
+    title: '🩺 ส่งข้อมูลผู้ป่วยหาหมอ',
+    note: `${complaint} (ส่งถึง: ${doctorName})`
+  });
+
+  const baseUrl = (state.firebaseUrl || DEFAULT_FIREBASE_URL).replace(/\/$/, '');
+  try {
+    await fetch(`${baseUrl}/doctor_referrals.json`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(referralData)
+    });
+    if (showToastMsg) showToast('☁️ บันทึกประวัติการส่งต่อแพทย์ขึ้น Firebase สำเร็จ');
+  } catch (err) {
+    console.warn('Firebase referral sync error:', err);
+  }
 }
 
 // Export Center Excel

@@ -38,6 +38,10 @@
         </a>
 
         <div class="header-actions">
+          <!-- Quick Send to Doctor Button -->
+          <button class="btn-doctor-quick" onclick="openDoctorReferralModal()" title="ส่งข้อมูลผู้ป่วยปรึกษาแพทย์">
+            🩺 ส่งข้อมูลหาหมอ
+          </button>
           <!-- Screen Wake Lock Toggle -->
           <button id="btnWakeLock" class="btn-icon" title="เปิด/ปิดการเปิดหน้าจอตลอดเวลา (ป้องกันจอดับ)" onclick="toggleWakeLock()">
             <span id="wakeLockIcon">💡</span>
@@ -294,9 +298,14 @@
               <div class="card-header-title">
                 <span>📋 สรุปรายงานสำหรับส่งต่อแพทย์ / ญาติผู้สูงอายุ (LINE)</span>
               </div>
-              <button class="btn btn-primary" style="padding: 4px 12px; font-size: 0.78rem;" onclick="copyDoctorReport()">
-                📲 คัดลอกส่ง LINE
-              </button>
+              <div style="display: flex; gap: 6px;">
+                <button class="btn btn-primary" style="padding: 4px 12px; font-size: 0.78rem; background: #0284c7; border: none;" onclick="openDoctorReferralModal()">
+                  🩺 ส่งข้อมูลหาหมอ
+                </button>
+                <button class="btn btn-outline" style="padding: 4px 12px; font-size: 0.78rem;" onclick="copyDoctorReport()">
+                  📲 คัดลอกส่ง LINE
+                </button>
+              </div>
             </div>
             <div style="margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
               <span style="font-size: 0.8rem; font-weight: 700; color: #334155;">เลือกห้องที่ต้องการสรุป:</span>
@@ -585,8 +594,11 @@
 
       <!-- Modal Footer Action Buttons -->
       <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-        <button class="btn btn-primary" style="flex: 1;" onclick="shareActiveRoomDoctorReport()">
-          📲 ส่งรายงาน LINE ของห้องนี้
+        <button class="btn btn-primary" style="flex: 2; background: #0284c7; border: none; font-weight: 800;" onclick="openDoctorReferralModal(state.selectedRoomId)">
+          🩺 ส่งข้อมูลผู้ป่วยหาหมอ (Referral)
+        </button>
+        <button class="btn btn-outline" style="flex: 1;" onclick="shareActiveRoomDoctorReport()">
+          📲 ส่งรายงาน LINE
         </button>
         <button class="btn btn-outline" style="color: #dc2626;" onclick="deleteActiveRoom()">
           🗑️ จำหน่าย/ลบห้อง
@@ -678,6 +690,114 @@
         </button>
       </div>
     </div>
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- MODAL: SEND PATIENT DATA TO DOCTOR (ส่งข้อมูลผู้ป่วยหาหมอ)           -->
+  <!-- ============================================================== -->
+  <div class="modal-overlay" id="modalDoctorReferral">
+    <div class="modal-box large" style="max-width: 780px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.4rem;">🩺</span>
+          <div>
+            <h3 class="modal-title" style="margin: 0; font-size: 1.15rem;">ส่งข้อมูลผู้ป่วยปรึกษาแพทย์ / ส่งต่อโรงพยาบาล</h3>
+            <div style="font-size: 0.75rem; color: var(--text-muted);">Medical Consultation & Patient Referral System</div>
+          </div>
+        </div>
+        <button class="btn-close-modal" onclick="closeDoctorReferralModal()">✕</button>
+      </div>
+
+      <!-- Select Room / Patient -->
+      <div class="form-group" style="margin-bottom: 10px;">
+        <label class="form-label">🏢 เลือกห้องพัก / ผู้สูงอายุที่ต้องการส่งหาหมอ *</label>
+        <select id="docRefRoomSelect" class="form-input" onchange="onDoctorReferralRoomChange(this.value)">
+          <!-- Populated by JS -->
+        </select>
+      </div>
+
+      <!-- Patient Demographics Strip -->
+      <div class="patient-summary-strip" id="docRefPatientStrip">
+        <!-- Rendered via JS -->
+      </div>
+
+      <!-- Live Vitals Grid -->
+      <div class="referral-vitals-grid" id="docRefVitalsGrid">
+        <!-- Rendered via JS -->
+      </div>
+
+      <!-- Chief Complaint & Quick Reason Selection -->
+      <div class="form-group" style="margin-bottom: 8px;">
+        <label class="form-label">🚨 เหตุผล / อาการสำคัญที่ปรึกษาแพทย์ (Chief Complaint) *</label>
+        <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">
+          <span class="quick-tag-chip" onclick="setDocRefChiefComplaint('🚨 มีไข้สูงเฉียบพลัน (>38°C) หนาวสั่น ซึมลง')">🚨 ไข้สูงเฉียบพลัน</span>
+          <span class="quick-tag-chip" onclick="setDocRefChiefComplaint('🫀 ความดันโลหิตสูงวิกฤต (>160/100 mmHg) ปวดศีรษะ')">🫀 ความดันโลหิตสูงวิกฤต</span>
+          <span class="quick-tag-chip" onclick="setDocRefChiefComplaint('🫁 หายใจเหนื่อยหอบ ออกซิเจนปลายนิ้วต่ำ (<95%)')">🫁 หายใจเหนื่อย / SpO2 ต่ำ</span>
+          <span class="quick-tag-chip" onclick="setDocRefChiefComplaint('😴 ซึมลง ไม่ค่อยตอบสนอง สับสนเฉียบพลัน')">😴 ซึมลง / สับสนเฉียบพลัน</span>
+          <span class="quick-tag-chip" onclick="setDocRefChiefComplaint('🩹 แผลกดทับบวมแดง อักเสบ มีหนองหรือเลือดซึม')">🩹 แผลกดทับอักเสบ</span>
+          <span class="quick-tag-chip" onclick="setDocRefChiefComplaint('🤢 ทานอาหารไม่ได้ อาเจียน สำลัก อ่อนเพลียมาก')">🤢 ทานไม่ได้ / สำลัก</span>
+          <span class="quick-tag-chip" onclick="setDocRefChiefComplaint('💊 ขอคำปรึกษาปรับขนาดยาประจำตัว / ขอใบสั่งยาเพิ่ม')">💊 ปรึกษาปรับยาประจำตัว</span>
+          <span class="quick-tag-chip" onclick="setDocRefChiefComplaint('📋 รายงานสรุปอาการประจำสัปดาห์ / ตรวจตามรอบนัด')">📋 รายงานสรุปอาการตามรอบ</span>
+        </div>
+        <input type="text" id="docRefChiefComplaint" class="form-input" placeholder="พิมพ์เหตุผลหรืออาการที่ต้องการปรึกษาแพทย์ หรือคลิกปุ่มด่วนด้านบน..." oninput="updateDoctorReferralPreview()">
+      </div>
+
+      <!-- Nurse's Clinical Notes -->
+      <div class="form-group" style="margin-bottom: 10px;">
+        <label class="form-label">📝 รายละเอียดอาการเพิ่มเติม & การดูแลเบื้องต้นที่ได้ดำเนินการไปแล้ว</label>
+        <textarea id="docRefNurseNotes" class="form-input" rows="2" placeholder="เช่น เช็ดตัวลดไข้แล้ว 30 นาที อุณหภูมิยังไม่ลด, ให้จิบน้ำเกลือแร่, ตรวจสอบสายปัสสาวะไม่อุดตัน..." oninput="updateDoctorReferralPreview()"></textarea>
+      </div>
+
+      <!-- Doctor & Nurse Details Row -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label">👨‍⚕️ แพทย์ / โรงพยาบาลปลายทาง</label>
+          <input type="text" id="docRefDoctorName" class="form-input" placeholder="เช่น นพ.ประจำศูนย์, รพ.ประจำอำเภอ" oninput="updateDoctorReferralPreview()">
+        </div>
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label">👩‍⚕️ ผู้ส่งข้อมูล (พยาบาล/เจ้าหน้าที่)</label>
+          <input type="text" id="docRefNurseName" class="form-input" placeholder="เช่น พยาบาลสมรักษ์ (เวรดึก)" oninput="updateDoctorReferralPreview()">
+        </div>
+      </div>
+
+      <!-- Real-time Medical SBAR Report Preview -->
+      <div class="form-group" style="margin-bottom: 12px;">
+        <label class="form-label" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>📋 ตัวอย่างข้อความรายงานแพทย์ (SBAR Medical Format)</span>
+          <span style="font-size: 0.72rem; color: #0284c7; font-weight: 700;">พร้อมส่งเข้า LINE / อีเมล / พิมพ์ใบส่งตัว</span>
+        </label>
+        <textarea id="docRefPreviewBox" class="referral-preview-box" readonly></textarea>
+      </div>
+
+      <!-- Action Buttons Row -->
+      <div class="action-row-doctor">
+        <button class="btn btn-primary" style="background: #06c755; border: none; font-weight: 800;" onclick="sendDoctorReferralViaLine()">
+          📲 ส่งเข้า LINE หมอทันที
+        </button>
+        <button class="btn btn-outline" onclick="copyDoctorReferralText()">
+          📋 คัดลอกข้อความ
+        </button>
+        <button class="btn btn-outline" onclick="sendDoctorReferralViaEmail()">
+          ✉️ ส่งอีเมลหาหมอ
+        </button>
+        <button class="btn btn-outline" style="border-color: #0284c7; color: #0284c7;" onclick="printDoctorReferralSheet()">
+          🖨️ พิมพ์ใบส่งตัว
+        </button>
+      </div>
+
+      <div style="margin-top: 8px; text-align: center;">
+        <button class="btn btn-outline" style="font-size: 0.75rem; border: none; color: #64748b;" onclick="syncDoctorReferralToFirebase()">
+          ☁️ บันทึกประวัติการส่งต่อขึ้นระบบออนไลน์ (Firebase Queue)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- PRINTABLE MEDICAL REFERRAL SLIP (ใบส่งตัวทางการแพทย์สำหรับพิมพ์)  -->
+  <!-- ============================================================== -->
+  <div id="printableReferralSlip">
+    <!-- Populated by JS for printing -->
   </div>
 
   <!-- ============================================================== -->
