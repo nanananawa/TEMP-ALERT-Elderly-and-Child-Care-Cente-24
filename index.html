@@ -322,9 +322,14 @@
               <div class="card-header-title">
                 <span>🕒 บันทึกกิจกรรมการดูแลของศูนย์วันนี้</span>
               </div>
-              <button class="btn btn-outline" style="padding: 2px 8px; font-size: 0.72rem;" onclick="clearCenterLogs()">
-                ล้างประวัติ
-              </button>
+              <div style="display: flex; gap: 6px;">
+                <button class="btn btn-primary" style="padding: 4px 12px; font-size: 0.78rem;" onclick="openAddCareLogModal()">
+                  ✍️ เขียนบันทึกการดูแล
+                </button>
+                <button class="btn btn-outline" style="padding: 2px 8px; font-size: 0.72rem;" onclick="clearCenterLogs()">
+                  ล้างประวัติ
+                </button>
+              </div>
             </div>
 
             <div class="search-input-wrapper" style="margin-bottom: 12px; border-radius: var(--radius-md); padding: 6px 12px;">
@@ -553,6 +558,21 @@
         </div>
       </div>
 
+      <!-- Room Care History / Logs for this room -->
+      <div class="vitals-card" style="margin-bottom: 12px; padding: 14px;">
+        <div class="card-header-row">
+          <div class="card-header-title" style="font-size: 0.95rem;">
+            <span>📝 บันทึกการดูแลประจำห้องนี้</span>
+          </div>
+          <button class="btn btn-primary" style="padding: 4px 10px; font-size: 0.75rem;" onclick="openAddCareLogModal(state.selectedRoomId)">
+            ✍️ เขียนบันทึก
+          </button>
+        </div>
+        <div id="modalRoomCareLogsContainer" style="max-height: 200px; overflow-y: auto;">
+          <!-- Rendered via JS -->
+        </div>
+      </div>
+
       <!-- Temperature Trend Chart for This Room -->
       <div class="chart-card" style="margin-bottom: 12px; padding: 14px;">
         <div class="card-header-title" style="font-size: 0.95rem; margin-bottom: 8px;">
@@ -570,6 +590,91 @@
         </button>
         <button class="btn btn-outline" style="color: #dc2626;" onclick="deleteActiveRoom()">
           🗑️ จำหน่าย/ลบห้อง
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- MODAL: ADD / WRITE CARE LOG (เขียนบันทึกการดูแลผู้สูงอายุ)            -->
+  <!-- ============================================================== -->
+  <div class="modal-overlay" id="modalAddCareLog">
+    <div class="modal-box" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3 class="modal-title">✍️ เขียนบันทึกการดูแลผู้สูงอายุ</h3>
+        <button class="btn-close-modal" onclick="closeAddCareLogModal()">✕</button>
+      </div>
+
+      <!-- Select Room -->
+      <div class="form-group">
+        <label class="form-label">🏢 ห้องพัก / ผู้สูงอายุ *</label>
+        <select id="careLogRoomSelect" class="form-input">
+          <!-- Populated by JS -->
+        </select>
+      </div>
+
+      <!-- Category & Shift row -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+        <div class="form-group">
+          <label class="form-label">📂 หมวดหมู่การดูแล *</label>
+          <select id="careLogCategory" class="form-input" onchange="handleCareLogCategoryChange(this.value)">
+            <option value="turn">🔄 พลิกตัว / จัดท่านอน</option>
+            <option value="hygiene">🛁 สุขอนามัย / เช็ดตัว / ผ้าอ้อม</option>
+            <option value="meal">🍲 อาหารและน้ำ / สายยาง</option>
+            <option value="med">💊 ป้อนยา / พ่นยา</option>
+            <option value="vitals">🩺 สัญญาณชีพ / DTX น้ำตาล</option>
+            <option value="wound">🩹 ทำแผล / ดูดเสมหะ / พยาบาล</option>
+            <option value="sleep">😴 การนอนหลับ / พักผ่อน</option>
+            <option value="alert">⚠️ อาการผิดปกติ / รายงานแพทย์</option>
+            <option value="info">📝 บันทึกทั่วไป / ส่งเวร</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">⏰ เวรการทำงาน / กะ</label>
+          <select id="careLogShift" class="form-input">
+            <option value="morning">☀️ เวรเช้า (07:00 - 15:00)</option>
+            <option value="afternoon">🌅 เวรบ่าย (15:00 - 23:00)</option>
+            <option value="night">🌙 เวรดึก (23:00 - 07:00)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Time & Caregiver row -->
+      <div style="display: grid; grid-template-columns: 1fr 1.5fr; gap: 10px;">
+        <div class="form-group">
+          <label class="form-label">🕒 เวลาที่ดูแล</label>
+          <input type="time" id="careLogTime" class="form-input">
+        </div>
+        <div class="form-group">
+          <label class="form-label">👤 ผู้บันทึก (พยาบาล/ผู้ดูแล) *</label>
+          <input type="text" id="careLogStaff" class="form-input" placeholder="เช่น พยาบาลสมรักษ์, ผู้ดูแลกานต์">
+        </div>
+      </div>
+
+      <!-- Quick Tag Suggestions -->
+      <div class="form-group" style="margin-bottom: 8px;">
+        <label class="form-label">
+          <span>⚡ ข้อความด่วน (คลิกเพื่อแทรกข้อความ):</span>
+        </label>
+        <div id="careLogQuickTags" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;">
+          <!-- Populated dynamically by category -->
+        </div>
+      </div>
+
+      <!-- Note Details -->
+      <div class="form-group">
+        <label class="form-label">📝 รายละเอียดการดูแล / สังเกตอาการ *</label>
+        <textarea id="careLogNote" class="form-input" rows="3" placeholder="พิมพ์รายละเอียดการดูแล หรือคลิกข้อความด่วนด้านบน..."></textarea>
+      </div>
+
+      <!-- Action Button -->
+      <div style="display: flex; gap: 8px; margin-top: 16px;">
+        <button class="btn btn-outline" style="flex: 1;" onclick="closeAddCareLogModal()">
+          ยกเลิก
+        </button>
+        <button class="btn btn-primary" style="flex: 2;" onclick="saveCareLogModal()">
+          💾 บันทึกการดูแล (ซิงค์ Firebase)
         </button>
       </div>
     </div>

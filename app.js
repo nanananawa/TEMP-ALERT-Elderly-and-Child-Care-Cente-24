@@ -193,11 +193,9 @@ document.addEventListener('DOMContentLoaded', () => {
   setupAudioUnlock();
   checkAudioStatus();
 
-  if (state.mode === 'firebase') {
-    connectFirebase();
-  } else {
-    enableDemoMode();
-  }
+  // เชื่อมต่ออัตโนมัติเข้า Firebase Realtime Database
+  state.mode = 'firebase';
+  connectFirebase();
 
   // 1-second interval for timers and alarm check
   timerTickInterval = setInterval(() => {
@@ -545,6 +543,9 @@ function renderRoomsGrid() {
           <button class="btn-room-action turn" onclick="quickTurnRoom('${r.id}')" title="กดเพื่อบันทึกการพลิกตัวทันที">
             ✔ พลิกตัวแล้ว
           </button>
+          <button class="btn-room-action log" onclick="openAddCareLogModal('${r.id}')" title="เขียนบันทึกการดูแลสำหรับห้องนี้">
+            ✍️ บันทึก
+          </button>
           <button class="btn-room-action sos" onclick="triggerRoomSos('${r.id}')" title="กดส่งสัญญาณฉุกเฉิน">
             🚨
           </button>
@@ -680,6 +681,9 @@ function openRoomDetailModal(roomId) {
 
   // Meds list
   renderActiveRoomMedList(room);
+
+  // Care Logs for this room
+  renderModalRoomCareLogs(room);
 
   // Chart
   renderModalRoomChart(room);
@@ -1106,8 +1110,258 @@ function saveNewMed() {
 }
 
 // ==========================================
-// Central Logs & Timeline
+// Central Logs & Nursing Care Notes System
 // ==========================================
+const CARE_CATEGORIES = {
+  turn: {
+    icon: '🔄',
+    title: 'การพลิกตัว / จัดท่านอน',
+    tags: ['นอนหงาย ยกหัวสูง 30°', 'นอนตะแคงขวา 30°', 'นอนตะแคงซ้าย 30°', 'ผิวหนังปกติ ไม่มีรอยแดง', 'นวดหลังผ่อนคลาย', 'จัดหมอนหนุนส้นเท้า/เข่า']
+  },
+  hygiene: {
+    icon: '🛁',
+    title: 'สุขอนามัย / เช็ดตัว / ผ้าอ้อม',
+    tags: ['เช็ดตัวบนเตียงเรียบร้อย', 'เปลี่ยนผ้าอ้อมสำเร็จรูป', 'ทาแป้งและโลชั่นบำรุงผิว', 'ดูแลทำความสะอาดช่องปาก/ฟัน', 'สระผมและเช็ดแห้ง', 'ทำความสะอาดจุดอับชื้น']
+  },
+  meal: {
+    icon: '🍲',
+    title: 'อาหารและน้ำ / สายยาง',
+    tags: ['ทานอาหารอ่อนหมด 1 ถ้วย', 'ทานข้าวต้ม 1/2 ถ้วย', 'ให้อาหารทางสายยาง 300 ml', 'ป้อนน้ำ 200 ml ดื่มได้ดี', 'ให้ผลไม้บดละเอียด', 'ไม่มีอาการสำลัก']
+  },
+  med: {
+    icon: '💊',
+    title: 'ป้อนยา / พ่นยา / ฉีดยา',
+    tags: ['ป้อนยาเช้าครบตามแพทย์สั่ง', 'ป้อนยากลางวันครบถ้วน', 'ป้อนยาก่อนนอนเรียบร้อย', 'ทายาผิวหนัง/ผื่น', 'พ่นยาขยายหลอดลม', 'ฉีดอินซูลินก่อนอาหาร']
+  },
+  vitals: {
+    icon: '🩺',
+    title: 'ตรวจวัดสัญญาณชีพ / DTX',
+    tags: ['สัญญาณชีพปกติทุกค่า', 'ความดันปกติ ชีพจรสม่ำเสมอ', 'มีไข้ต่ำ เช็ดตัวลดไข้', 'เจาะน้ำตาล DTX 115 mg/dL', 'ออกซิเจนปลายนิ้ว 98%', 'วัดซ้ำหลังพัก 15 นาที']
+  },
+  wound: {
+    icon: '🩹',
+    title: 'ทำแผล / ดูดเสมหะ / พยาบาล',
+    tags: ['ทำแผลกดทับสะอาด ไม่มีหนอง', 'เปลี่ยนผ้าก๊อซ แผลแห้งดี', 'ดูดเสมหะสีขาวใส', 'ล้างสายสวนปัสสาวะ', 'แผลหายดีขึ้นอย่างชัดเจน', 'ใส่ยาฆ่าเชื้อที่แผล']
+  },
+  sleep: {
+    icon: '😴',
+    title: 'การนอนหลับ / พักผ่อน',
+    tags: ['หลับสบายตลอดคืน', 'นอนหลับพักผ่อนช่วงบ่าย', 'ตื่นมาปัสสาวะ 1 ครั้ง', 'กระสับกระส่ายเล็กน้อย', 'เปิดเพลงเบาๆ หลับได้ดี', 'จัดท่านอนให้สบายตัว']
+  },
+  alert: {
+    icon: '⚠️',
+    title: 'อาการผิดปกติ / แจ้งแพทย์',
+    tags: ['ไข้สูงเกิน 38°C แจ้งพยาบาลเวร', 'ความดันโลหิตสูง 160/95', 'มีเสมหะเหนียวข้น หายใจเหนื่อย', 'ซึมลง ทานอาหารได้น้อย', 'พบรอยแดงเริ่มแรกที่ก้นกบ', 'ประสานงานแพทย์ตรวจอาการ']
+  },
+  info: {
+    icon: '📝',
+    title: 'บันทึกทั่วไป / ส่งต่อเวร',
+    tags: ['ส่งมอบเวรเรียบร้อย อาการคงที่', 'ญาติเข้าเยี่ยมเวลา 14:00', 'พาเดินออกกำลังกายเบาๆ', 'อารมณ์ดี ยิ้มแย้มแจ่มใส', 'พูดคุยเล่าเรื่อง สนทนาได้ดี', 'ทำกายภาพบำบัดกล้ามเนื้อ']
+  }
+};
+
+function getCurrentShift() {
+  const hour = new Date().getHours();
+  if (hour >= 7 && hour < 15) return 'morning';
+  if (hour >= 15 && hour < 23) return 'afternoon';
+  return 'night';
+}
+
+function getShiftLabel(shift) {
+  if (shift === 'morning') return '☀️ เวรเช้า (07:00-15:00)';
+  if (shift === 'afternoon') return '🌅 เวรบ่าย (15:00-23:00)';
+  return '🌙 เวรดึก (23:00-07:00)';
+}
+
+function openAddCareLogModal(preselectedRoomId) {
+  const roomSelect = document.getElementById('careLogRoomSelect');
+  if (roomSelect) {
+    let opts = '';
+    state.rooms.forEach(r => {
+      opts += `<option value="${r.id}">${escapeHtml(r.roomNo)} - ${escapeHtml(r.name)}</option>`;
+    });
+    roomSelect.innerHTML = opts;
+    if (preselectedRoomId) {
+      roomSelect.value = preselectedRoomId;
+    } else if (state.selectedRoomId) {
+      roomSelect.value = state.selectedRoomId;
+    }
+  }
+
+  const timeInput = document.getElementById('careLogTime');
+  if (timeInput) {
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    timeInput.value = `${hh}:${mm}`;
+  }
+
+  const shiftSelect = document.getElementById('careLogShift');
+  if (shiftSelect) {
+    shiftSelect.value = getCurrentShift();
+  }
+
+  const staffInput = document.getElementById('careLogStaff');
+  if (staffInput) {
+    staffInput.value = localStorage.getItem('eldercare_staff_name') || '';
+  }
+
+  const catSelect = document.getElementById('careLogCategory');
+  if (catSelect) {
+    catSelect.value = 'turn';
+    handleCareLogCategoryChange('turn');
+  }
+
+  const noteInput = document.getElementById('careLogNote');
+  if (noteInput) noteInput.value = '';
+
+  document.getElementById('modalAddCareLog').classList.add('active');
+}
+
+function closeAddCareLogModal() {
+  document.getElementById('modalAddCareLog').classList.remove('active');
+}
+
+function handleCareLogCategoryChange(cat) {
+  const container = document.getElementById('careLogQuickTags');
+  if (!container) return;
+  const catData = CARE_CATEGORIES[cat] || CARE_CATEGORIES.turn;
+  let html = '';
+  catData.tags.forEach(t => {
+    html += `<span class="quick-tag-chip" onclick="appendQuickTagToCareLog('${escapeHtml(t)}')">${catData.icon} ${escapeHtml(t)}</span>`;
+  });
+  container.innerHTML = html;
+}
+
+function appendQuickTagToCareLog(tagText) {
+  const noteInput = document.getElementById('careLogNote');
+  if (!noteInput) return;
+  if (noteInput.value.trim().length > 0) {
+    noteInput.value += ', ' + tagText;
+  } else {
+    noteInput.value = tagText;
+  }
+}
+
+function saveCareLogModal() {
+  const roomSelect = document.getElementById('careLogRoomSelect');
+  const catSelect = document.getElementById('careLogCategory');
+  const shiftSelect = document.getElementById('careLogShift');
+  const timeInput = document.getElementById('careLogTime');
+  const staffInput = document.getElementById('careLogStaff');
+  const noteInput = document.getElementById('careLogNote');
+
+  const roomId = roomSelect.value;
+  const room = state.rooms.find(r => r.id === roomId);
+  if (!room) {
+    alert('กรุณาเลือกห้องพัก');
+    return;
+  }
+
+  const cat = catSelect.value;
+  const catData = CARE_CATEGORIES[cat] || { icon: '📝', title: 'บันทึกการดูแล' };
+  const shift = shiftSelect.value;
+  const timeStr = timeInput.value || new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+  const staffName = staffInput.value.trim() || 'เจ้าหน้าที่ศูนย์';
+  const noteText = noteInput.value.trim();
+
+  if (!noteText) {
+    alert('กรุณาระบุรายละเอียดการดูแลหรือคลิกข้อความด่วน');
+    return;
+  }
+
+  localStorage.setItem('eldercare_staff_name', staffName);
+
+  const logEntry = {
+    id: 'cl_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+    type: cat,
+    roomId: room.id,
+    roomNo: room.roomNo,
+    residentName: room.name,
+    title: catData.title,
+    shift: shift,
+    shiftLabel: getShiftLabel(shift),
+    staff: staffName,
+    time: timeStr,
+    timestamp: Date.now(),
+    note: noteText,
+    createdAt: new Date().toISOString()
+  };
+
+  state.centerLogs.unshift(logEntry);
+  if (state.centerLogs.length > 100) state.centerLogs.pop();
+
+  if (cat === 'turn') {
+    if (!room.turnSchedule) room.turnSchedule = { currentPosIndex: 0, nextTurnDue: Date.now() + 7200000 };
+    room.turnSchedule.currentPosIndex = (room.turnSchedule.currentPosIndex + 1) % TURN_POSITIONS.length;
+    room.turnSchedule.nextTurnDue = Date.now() + 2 * 60 * 60 * 1000;
+  }
+
+  saveState();
+  renderCenterLogs();
+  updateDoctorReport();
+  if (state.selectedRoomId === room.id) {
+    renderModalRoomCareLogs(room);
+  }
+
+  pushCareLogToFirebase(logEntry);
+
+  closeAddCareLogModal();
+  showToast(`✅ บันทึกการดูแล ${room.roomNo} สำเร็จ (ซิงค์ Firebase แล้ว)`);
+}
+
+function deleteCareLog(logId) {
+  if (!confirm('ต้องการลบบันทึกการดูแลรายการนี้หรือไม่?')) return;
+  state.centerLogs = state.centerLogs.filter(l => l.id !== logId);
+  saveState();
+  renderCenterLogs();
+  updateDoctorReport();
+  if (state.selectedRoomId) {
+    const r = state.rooms.find(x => x.id === state.selectedRoomId);
+    if (r) renderModalRoomCareLogs(r);
+  }
+}
+
+function renderModalRoomCareLogs(room) {
+  const container = document.getElementById('modalRoomCareLogsContainer');
+  if (!container) return;
+
+  const roomLogs = state.centerLogs.filter(l => l.roomId === room.id || l.roomNo === room.roomNo);
+  if (roomLogs.length === 0) {
+    container.innerHTML = `
+      <div style="text-align: center; color: #94a3b8; padding: 16px 0; font-size: 0.8rem;">
+        ยังไม่มีบันทึกการดูแลของห้องนี้ คลิก "✍️ เขียนบันทึก" เพื่อเพิ่มบันทึกแรก
+      </div>
+    `;
+    return;
+  }
+
+  let html = '';
+  roomLogs.slice(0, 10).forEach(l => {
+    const catData = CARE_CATEGORIES[l.type] || { icon: '📝' };
+    html += `
+      <div class="log-item" style="padding: 8px 10px; margin-bottom: 6px;">
+        <div class="log-left" style="gap: 8px;">
+          <div class="log-icon-box" style="width: 30px; height: 30px; font-size: 15px;">${catData.icon}</div>
+          <div>
+            <div style="font-size: 0.82rem; font-weight: 700; color: #0f172a;">
+              ${escapeHtml(l.title)}
+              <span class="log-shift-badge">${escapeHtml(l.shiftLabel ? l.shiftLabel.split(' ')[0] : '')}</span>
+            </div>
+            <div class="log-meta">
+              🕒 ${escapeHtml(l.time)} ${l.staff ? `• 👤 ${escapeHtml(l.staff)}` : ''}
+            </div>
+            <div class="log-note-text">${escapeHtml(l.note)}</div>
+          </div>
+        </div>
+        <button class="btn-delete-log" onclick="deleteCareLog('${l.id}')" title="ลบบันทึก">🗑️</button>
+      </div>
+    `;
+  });
+
+  container.innerHTML = html;
+}
+
 function addCenterLog(entry) {
   const newLog = {
     id: 'log_' + Date.now(),
@@ -1116,11 +1370,12 @@ function addCenterLog(entry) {
     roomNo: entry.roomNo || '-',
     residentName: entry.residentName || '-',
     title: entry.title || 'บันทึกกิจกรรม',
-    note: entry.note || ''
+    note: entry.note || '',
+    timestamp: Date.now()
   };
 
   state.centerLogs.unshift(newLog);
-  if (state.centerLogs.length > 80) state.centerLogs.pop();
+  if (state.centerLogs.length > 100) state.centerLogs.pop();
   saveState();
   renderCenterLogs();
   updateDoctorReport();
@@ -1137,6 +1392,7 @@ function renderCenterLogs() {
       (l.roomNo || '').toLowerCase().includes(q) ||
       (l.residentName || '').toLowerCase().includes(q) ||
       (l.title || '').toLowerCase().includes(q) ||
+      (l.staff || '').toLowerCase().includes(q) ||
       (l.note || '').toLowerCase().includes(q)
     );
   });
@@ -1144,33 +1400,33 @@ function renderCenterLogs() {
   if (filtered.length === 0) {
     container.innerHTML = `
       <div style="text-align: center; color: #94a3b8; padding: 24px 0;">
-        ${q ? `🔍 ไม่พบบันทึกกิจกรรมที่ตรงกับคำค้นหา "${escapeHtml(q)}"` : 'ยังไม่มีบันทึกกิจกรรมวันนี้'}
+        ${q ? `🔍 ไม่พบบันทึกกิจกรรมที่ตรงกับคำค้นหา "${escapeHtml(q)}"` : 'ยังไม่มีบันทึกการดูแลวันนี้ คลิก "✍️ เขียนบันทึกการดูแล" ด้านบนเพื่อเริ่มบันทึก'}
       </div>
     `;
     return;
   }
 
-  const icons = {
-    med: '💊',
-    turn: '🔄',
-    water: '💧',
-    vitals: '🫀',
-    alert: '🚨',
-    info: '📝'
-  };
-
   let html = '';
   filtered.forEach(l => {
+    const catData = CARE_CATEGORIES[l.type] || { icon: '📝' };
     html += `
-      <div class="log-item">
+      <div class="log-item" id="log-${l.id}">
         <div class="log-left">
-          <div class="log-icon-box">${icons[l.type] || '📝'}</div>
+          <div class="log-icon-box">${catData.icon}</div>
           <div>
-            <div class="log-title">${escapeHtml(l.title)}</div>
-            <div class="log-meta">${l.time} ${l.note ? `• ${escapeHtml(l.note)}` : ''}</div>
+            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+              <span class="room-number-badge" style="font-size: 0.72rem; padding: 2px 6px;">${escapeHtml(l.roomNo)}</span>
+              <span style="font-size: 0.85rem; font-weight: 800; color: #0f172a;">${escapeHtml(l.residentName)}</span>
+              <span style="font-size: 0.78rem; font-weight: 700; color: #2563eb;">${escapeHtml(l.title)}</span>
+              ${l.shiftLabel ? `<span class="log-shift-badge">${escapeHtml(l.shiftLabel.split(' ')[0])}</span>` : ''}
+            </div>
+            <div class="log-meta" style="margin-top: 2px;">
+              🕒 เวลา ${escapeHtml(l.time)} ${l.staff ? `• 👤 บันทึกโดย: <strong>${escapeHtml(l.staff)}</strong>` : ''}
+            </div>
+            ${l.note ? `<div class="log-note-text">${escapeHtml(l.note)}</div>` : ''}
           </div>
         </div>
-        <span class="room-number-badge" style="font-size: 0.75rem;">${escapeHtml(l.roomNo)}</span>
+        <button class="btn-delete-log" onclick="deleteCareLog('${l.id}')" title="ลบบันทึกนี้">🗑️</button>
       </div>
     `;
   });
@@ -1226,6 +1482,15 @@ function updateDoctorReport() {
       text += `  • โรคประจำตัว: ${r.condition || '-'}\n`;
       text += `  • ท่าพลิกตัว: ${r.turnSchedule ? TURN_POSITIONS[r.turnSchedule.currentPosIndex % TURN_POSITIONS.length] : '-'}\n`;
     });
+    // Recent Care Logs
+    if (state.centerLogs.length > 0) {
+      text += `──────────────────\n`;
+      text += `📝 บันทึกการดูแลล่าสุดของศูนย์:\n`;
+      state.centerLogs.slice(0, 4).forEach(l => {
+        text += `  • [${l.roomNo} - ${l.time}] ${l.title}: ${l.note} (${l.staff || 'เจ้าหน้าที่'})\n`;
+      });
+    }
+
     text += `──────────────────\n`;
     text += `สถานะฉุกเฉิน: ${document.getElementById('statCriticalRooms').textContent} ห้องวิกฤต, ${document.getElementById('statWarningRooms').textContent} ห้องเฝ้าระวัง\n`;
   } else {
@@ -1242,6 +1507,15 @@ function updateDoctorReport() {
       text += `💧 ดื่มน้ำวันนี้: ${room.hydration ? room.hydration.todayMl : 0} ml\n`;
       text += `🔄 ท่าพลิกตัวล่าสุด: ${room.turnSchedule ? TURN_POSITIONS[room.turnSchedule.currentPosIndex % TURN_POSITIONS.length] : '-'}\n`;
       text += `💊 ยาที่ทานแล้ว: ${(room.medications || []).filter(m => m.takenToday).map(m => m.name).join(', ') || 'ยังไม่มี'}\n`;
+
+      // Recent Care Logs for this room
+      const roomLogs = state.centerLogs.filter(l => l.roomId === room.id || l.roomNo === room.roomNo);
+      if (roomLogs.length > 0) {
+        text += `📝 บันทึกการดูแลล่าสุด:\n`;
+        roomLogs.slice(0, 4).forEach(l => {
+          text += `  • [${l.time}] ${l.title}: ${l.note}${l.staff ? ` (${l.staff})` : ''}\n`;
+        });
+      }
     }
   }
 
@@ -1322,6 +1596,37 @@ function exportCenterExcel() {
     `;
   });
 
+  if (state.centerLogs && state.centerLogs.length > 0) {
+    tableHtml += `
+      <br>
+      <h3>บันทึกการดูแลผู้สูงอายุ (Care Notes Log)</h3>
+      <table border="1">
+        <tr style="background:#0284c7;color:#ffffff;">
+          <th>วันเวลา</th>
+          <th>ห้อง</th>
+          <th>ชื่อผู้สูงอายุ</th>
+          <th>เวร</th>
+          <th>ผู้บันทึก</th>
+          <th>หมวดหมู่</th>
+          <th>รายละเอียดการดูแล</th>
+        </tr>
+    `;
+    state.centerLogs.forEach(l => {
+      tableHtml += `
+        <tr>
+          <td>${l.time || ''}</td>
+          <td>${l.roomNo || ''}</td>
+          <td>${l.residentName || ''}</td>
+          <td>${l.shiftLabel || ''}</td>
+          <td>${l.staff || ''}</td>
+          <td>${l.title || ''}</td>
+          <td>${l.note || ''}</td>
+        </tr>
+      `;
+    });
+    tableHtml += `</table>`;
+  }
+
   tableHtml += `</table></body></html>`;
 
   const blob = new Blob([tableHtml], { type: 'application/vnd.ms-excel;charset=utf-8' });
@@ -1339,6 +1644,14 @@ function exportCenterCsv() {
     const v = r.vitals || {};
     csv += `"${r.roomNo}","${r.name}","${r.age}","${r.hn}","${r.careLevel}","${r.condition || ''}",${r.temp.toFixed(1)},"${v.bpSys}/${v.bpDia}",${v.pulse},${v.spo2},${v.glucose},${r.hydration ? r.hydration.todayMl : 0}\n`;
   });
+
+  if (state.centerLogs && state.centerLogs.length > 0) {
+    csv += "\n\nบันทึกการดูแลผู้สูงอายุ (Care Notes Log)\n";
+    csv += "เวลา,ห้อง,ชื่อผู้สูงอายุ,เวร,ผู้บันทึก,หมวดหมู่,รายละเอียด\n";
+    state.centerLogs.forEach(l => {
+      csv += `"${l.time || ''}","${l.roomNo || ''}","${l.residentName || ''}","${l.shiftLabel || ''}","${l.staff || ''}","${l.title || ''}","${(l.note || '').replace(/"/g, '""')}"\n`;
+    });
+  }
 
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
@@ -1397,55 +1710,201 @@ function setSimTemp(val) {
   closeSimulationModal();
 }
 
+let firebasePollInterval = null;
+let firebaseReconnectTimeout = null;
+
+function updateConnectionPill(status, text) {
+  const pill = document.getElementById('connectionStatusPill');
+  const txt = document.getElementById('connectionStatusText');
+  if (!pill || !txt) return;
+  if (status === 'online') {
+    pill.className = 'connection-pill online';
+    txt.textContent = text || 'Live เซนเซอร์';
+  } else if (status === 'connecting') {
+    pill.className = 'connection-pill demo';
+    txt.textContent = text || 'กำลังเชื่อมต่ออัตโนมัติ...';
+  } else {
+    pill.className = 'connection-pill demo';
+    txt.textContent = text || 'ออฟไลน์ / ลองใหม่';
+  }
+}
+
 // ==========================================
-// Firebase Realtime Database Sync
+// Firebase Realtime Database Sync (Auto-Connect & Real-Time Sync)
 // ==========================================
+async function fetchFirebaseData() {
+  if (state.mode !== 'firebase') return;
+  const baseUrl = (state.firebaseUrl || DEFAULT_FIREBASE_URL).replace(/\/$/, '');
+
+  try {
+    const res = await fetch(`${baseUrl}/.json`, { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data) {
+        handleFirebaseData(data);
+        updateConnectionPill('online', 'Live เซนเซอร์');
+      }
+    } else if (res.status === 401) {
+      updateConnectionPill('connecting', 'Firebase รอปลดล็อก Rules');
+    }
+  } catch (err) {
+    console.warn('Firebase poll fetch error:', err);
+  }
+}
+
 function connectFirebase() {
   if (state.mode !== 'firebase') return;
   const baseUrl = (state.firebaseUrl || DEFAULT_FIREBASE_URL).replace(/\/$/, '');
   const url = `${baseUrl}/.json`;
 
+  updateConnectionPill('connecting', 'กำลังเชื่อมต่ออัตโนมัติ...');
+
+  // 1. Initial immediate REST fetch
+  fetchFirebaseData();
+
+  // 2. Clear old interval / reconnect timer
+  if (firebaseReconnectTimeout) clearTimeout(firebaseReconnectTimeout);
+  if (firebasePollInterval) clearInterval(firebasePollInterval);
+
+  // 3. Periodic polling fallback (every 5 seconds)
+  firebasePollInterval = setInterval(() => {
+    fetchFirebaseData();
+  }, 5000);
+
+  // 4. Server-Sent Events (SSE Stream)
   try {
     if (firebaseEventSource) firebaseEventSource.close();
     firebaseEventSource = new EventSource(url);
 
+    firebaseEventSource.onopen = () => {
+      updateConnectionPill('online', 'Live เซนเซอร์');
+    };
+
     firebaseEventSource.addEventListener('put', (e) => {
       try {
         const payload = JSON.parse(e.data);
-        if (payload && payload.data) {
-          handleFirebaseData(payload.data);
+        if (payload && typeof payload.data !== 'undefined') {
+          handleFirebaseData(payload.data, payload.path);
         }
       } catch (err) {
-        console.warn('Firebase parse error:', err);
+        console.warn('Firebase SSE parse error:', err);
+      }
+    });
+
+    firebaseEventSource.addEventListener('patch', (e) => {
+      try {
+        const payload = JSON.parse(e.data);
+        if (payload && typeof payload.data !== 'undefined') {
+          handleFirebaseData(payload.data, payload.path);
+        }
+      } catch (err) {
+        console.warn('Firebase SSE patch error:', err);
       }
     });
 
     firebaseEventSource.onerror = () => {
-      document.getElementById('connectionStatusPill').className = 'connection-pill demo';
-      document.getElementById('connectionStatusText').textContent = 'กำลังเชื่อมต่อใหม่...';
+      updateConnectionPill('connecting', 'กำลังเชื่อมต่อใหม่...');
+      if (firebaseReconnectTimeout) clearTimeout(firebaseReconnectTimeout);
+      firebaseReconnectTimeout = setTimeout(() => {
+        if (state.mode === 'firebase') connectFirebase();
+      }, 5000);
     };
   } catch (err) {
-    console.warn('Firebase error:', err);
+    console.warn('Firebase EventSource error:', err);
   }
 }
 
-function handleFirebaseData(data) {
-  let tempVal = null;
-  if (typeof data.temperature !== 'undefined') tempVal = parseFloat(data.temperature);
-  else if (typeof data.temp !== 'undefined') tempVal = parseFloat(data.temp);
+function applySensorToRoom(deviceId, sensorData) {
+  if (!sensorData) return;
+  let tempVal = parseFloat(sensorData.temp || sensorData.temperature);
+  if (isNaN(tempVal)) return;
 
-  if (tempVal !== null && !isNaN(tempVal)) {
-    // Map to Room 101 or deviceId match
-    const room = state.rooms.find(r => r.deviceId === 'baby1') || state.rooms[0];
-    if (room) {
-      room.temp = tempVal;
-      if (data.battery) room.battery = parseInt(data.battery);
-      room.history.push({ time: new Date().toISOString(), temp: tempVal });
-      if (room.history.length > 100) room.history.shift();
-    }
+  // Match room by deviceId or id or fallback to Room 101
+  let room = state.rooms.find(r => r.deviceId === deviceId || r.id === deviceId);
+  if (!room && (deviceId === 'baby1' || deviceId === 'elderly1')) {
+    room = state.rooms[0];
+  }
+  if (room) {
+    room.temp = tempVal;
+    if (typeof sensorData.battery !== 'undefined') room.battery = parseInt(sensorData.battery);
+    if (!room.history) room.history = [];
+    room.history.push({ time: new Date().toISOString(), temp: tempVal });
+    if (room.history.length > 100) room.history.shift();
 
     saveState();
-    updateUI();
+    renderRoomsGrid();
+    updateCenterStats();
+
+    if (state.selectedRoomId === room.id && document.getElementById('modalRoomDetail').classList.contains('active')) {
+      openRoomDetailModal(room.id);
+    }
+  }
+}
+
+function handleFirebaseData(data, path) {
+  if (!data || typeof data !== 'object') return;
+
+  // 1. ESP32 format with babies node: { babies: { [id]: { current: { temp, battery } } } }
+  if (data.babies && typeof data.babies === 'object') {
+    Object.keys(data.babies).forEach(devId => {
+      const item = data.babies[devId];
+      const cur = (item && item.current) ? item.current : item;
+      if (cur) applySensorToRoom(devId, cur);
+    });
+  }
+
+  // 2. Elderly nodes: { elderly: { [id]: { current: { temp, battery } } } }
+  if (data.elderly && typeof data.elderly === 'object') {
+    Object.keys(data.elderly).forEach(devId => {
+      const item = data.elderly[devId];
+      const cur = (item && item.current) ? item.current : item;
+      if (cur) applySensorToRoom(devId, cur);
+    });
+  }
+
+  // 3. Single current object: { current: { temp, battery, deviceId } }
+  if (data.current && typeof data.current === 'object') {
+    applySensorToRoom(data.current.deviceId || 'elderly1', data.current);
+  }
+
+  // 4. Direct temperature value
+  if (typeof data.temperature !== 'undefined' || typeof data.temp !== 'undefined') {
+    applySensorToRoom(data.deviceId || 'elderly1', data);
+  }
+
+  // 5. Cloud Care Logs: { care_logs: { [id]: { ... } } }
+  if (data.care_logs && typeof data.care_logs === 'object') {
+    const remoteLogs = Object.values(data.care_logs);
+    let hasNew = false;
+    remoteLogs.forEach(rl => {
+      if (rl && rl.id && !state.centerLogs.some(existing => existing.id === rl.id)) {
+        state.centerLogs.push(rl);
+        hasNew = true;
+      }
+    });
+    if (hasNew) {
+      state.centerLogs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      saveState();
+      renderCenterLogs();
+      updateDoctorReport();
+      if (state.selectedRoomId) {
+        const r = state.rooms.find(x => x.id === state.selectedRoomId);
+        if (r) renderModalRoomCareLogs(r);
+      }
+    }
+  }
+}
+
+async function pushCareLogToFirebase(logEntry) {
+  const baseUrl = (state.firebaseUrl || DEFAULT_FIREBASE_URL).replace(/\/$/, '');
+  try {
+    await fetch(`${baseUrl}/care_logs.json`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(logEntry)
+    });
+  } catch (e) {
+    console.warn('Firebase care log sync error:', e);
   }
 }
 
