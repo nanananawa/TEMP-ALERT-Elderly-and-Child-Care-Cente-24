@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0d9488">
+  <meta name="description" content="CareTemp 24 - ระบบดูแลผู้สูงอายุแบบแบ่งห้องพัก (ศูนย์ดูแลผู้สูงอายุ) และระบบติดตามไข้เด็ก">
+  
+  <title>CareTemp 24 — ศูนย์ดูแลผู้สูงอายุและเด็ก (Elderly Care Center & Kids)</title>
+  
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon-192.png">
+
+  <!-- Fonts: Plus Jakarta Sans, Prompt, Noto Sans Thai, JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+Thai:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Prompt:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Local Chart.js -->
+  <script src="chart.umd.min.js"></script>
+
+  <link rel="stylesheet" href="styles.css?v=2.0">
+</head>
+<body>
+
+  <div class="app-container">
+    
+    <!-- Top App Header -->
+    <header class="care-header">
+      <div class="header-top">
+        <a href="../index.html" class="brand-wrapper" title="กลับหน้า Hub ศูนย์รวม">
+          <div class="brand-icon-circle">🏥</div>
+          <div>
+            <div class="brand-title">CareTemp 24</div>
+            <div class="brand-sub">ศูนย์ดูแลผู้สูงอายุและเด็ก • Senior Living & Family Care</div>
+          </div>
+        </a>
+
+        <div class="header-actions">
+          <!-- Screen Wake Lock Toggle -->
+          <button id="btnWakeLock" class="btn-icon" title="เปิด/ปิดการเปิดหน้าจอตลอดเวลา (ป้องกันจอดับ)" onclick="toggleWakeLock()">
+            <span id="wakeLockIcon">💡</span>
+          </button>
+          <!-- Sound Alert Toggle -->
+          <button id="btnSoundToggle" class="btn-icon active" title="เปิด/ปิดเสียงเตือน" onclick="toggleSound()">
+            <span id="soundIcon">🔔</span>
+          </button>
+          <!-- Central Siren Toggle -->
+          <button id="btnNightAlarm" class="btn-icon" title="เปิด/ปิดโหมดเตือนไซเรนศูนย์" onclick="toggleNightAlarm()">
+            <span id="nightAlarmIcon">🚨</span>
+          </button>
+          <!-- Install PWA Button -->
+          <button id="btnInstallPwa" class="btn-icon" style="display: none;" title="ติดตั้งแอปลงในเครื่อง">
+            <span>📲</span>
+          </button>
+          <!-- Quick Settings -->
+          <button class="btn-icon" title="ตั้งค่าระบบ" onclick="switchTab('settings')">
+            <span>⚙️</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Mode Switcher & Live Connection Bar -->
+      <div class="mode-switcher-container">
+        <div class="mode-pill-group">
+          <button id="btnModeElderly" class="mode-pill-btn active elderly" onclick="switchCareMode('elderly')">
+            <span>🏢</span>
+            <span>ศูนย์ดูแลผู้สูงอายุ (แบ่งห้อง)</span>
+          </button>
+          <button id="btnModeChild" class="mode-pill-btn child" onclick="switchCareMode('child')">
+            <span>👶</span>
+            <span>ดูแลเด็กเล็ก</span>
+          </button>
+        </div>
+
+        <div class="connection-pill online" id="connectionStatusPill" onclick="toggleSimulationModal()" title="คลิกเพื่อสลับโหมด Firebase / จำลอง">
+          <span class="connection-dot"></span>
+          <span id="connectionStatusText">Live เซนเซอร์</span>
+        </div>
+      </div>
+
+      <!-- Active Status Strip -->
+      <div class="profile-bar" id="topProfileBar">
+        <div class="profile-info">
+          <div class="profile-avatar-btn" id="headerAvatar" onclick="switchTab('settings')">
+            🏢
+          </div>
+          <div class="profile-details">
+            <div class="profile-name-row">
+              <span class="profile-name" id="headerPersonName">ศูนย์ดูแลผู้สูงอายุ (Senior Living Center)</span>
+              <span id="headerCenterRoomsBadge" class="profile-badge">6 ห้องพัก</span>
+              <span id="headerBattery" style="font-size: 0.75rem; color: #15803d; font-weight: 700;">📡 เชื่อมต่อ ESP32</span>
+            </div>
+            <div class="profile-meta">
+              <span id="headerPersonSub">ระบบติดตามสัญญาณชีพ • เตือนพลิกตัว • ตารางยาประจำห้อง</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Central Siren Emergency Alert Banner -->
+    <div id="centralAlarmBanner" class="center-alarm-banner" style="display: none;">
+      <div class="center-alarm-content">
+        <span style="font-size: 1.6rem; animation: pulse-dot 1s infinite;">🚨</span>
+        <div>
+          <div class="center-alarm-title" id="alarmBannerTitle">แจ้งเตือนภาวะฉุกเฉินระดับศูนย์!</div>
+          <div class="center-alarm-sub" id="alarmBannerSub">มีห้องพักที่อุณหภูมิหรือสัญญาณชีพผิดปกติ โปรดเข้าตรวจสอบทันที</div>
+        </div>
+      </div>
+      <button class="btn btn-outline" style="background: #ffffff; color: #991b1b; padding: 4px 12px; font-size: 0.75rem; border: none;" onclick="dismissAlertBanner()">
+        รับทราบ
+      </button>
+    </div>
+
+    <!-- Info / Warning Banners -->
+    <div id="demoBanner" class="info-banner demo" style="display: none;">
+      <span>🧪 กำลังเปิดโหมดทดสอบจำลอง (Simulation)</span>
+      <button class="btn btn-outline" style="padding: 2px 8px; font-size: 0.72rem; background: #ffffff;" onclick="setMode('firebase')">
+        สลับเป็น Live Firebase
+      </button>
+    </div>
+
+    <div id="audioUnlockBanner" class="info-banner audio-unlock" style="display: none;" onclick="unlockAudio()">
+      <span>🔊 แตะที่นี่เพื่อเปิดระบบเสียงเตือนภัย (Web Audio API)</span>
+      <button class="btn btn-primary" style="padding: 2px 8px; font-size: 0.7rem; pointer-events: none;">เปิดเสียง</button>
+    </div>
+
+    <div id="offlineBanner" class="info-banner offline" style="display: none;">
+      <span>⚠️ ไม่ได้รับข้อมูลเกิน 10 นาที โปรดตรวจเช็คอุปกรณ์และสัญญาณ WiFi</span>
+    </div>
+
+    <!-- Main Views (Tabs) -->
+    <main class="main-content">
+
+      <!-- ============================================================== -->
+      <!-- TAB 1: HOME / MONITOR                                          -->
+      <!-- ============================================================== -->
+      <section id="tab-home" class="tab-content active">
+
+        <!-- ========================================================== -->
+        <!-- ELDERLY CARE CENTER VIEW: ROOM-BY-ROOM (ศูนย์ผู้สูงอายุ)   -->
+        <!-- ========================================================== -->
+        <div id="elderlyHomeWidgets">
+          
+          <!-- Center Statistics Bar -->
+          <div class="center-stats-row">
+            <div class="center-stat-card" onclick="setRoomFilter('all')">
+              <span class="center-stat-num" id="statTotalRooms">6</span>
+              <span class="center-stat-lbl">ห้องทั้งหมด</span>
+            </div>
+            <div class="center-stat-card normal" onclick="setRoomFilter('normal')">
+              <span class="center-stat-num" style="color: #10b981;" id="statNormalRooms">4</span>
+              <span class="center-stat-lbl">อุณหภูมิปกติ</span>
+            </div>
+            <div class="center-stat-card warning" onclick="setRoomFilter('alert')">
+              <span class="center-stat-num" style="color: #f59e0b;" id="statWarningRooms">1</span>
+              <span class="center-stat-lbl">เฝ้าระวัง / ไข้</span>
+            </div>
+            <div class="center-stat-card critical" onclick="setRoomFilter('critical')">
+              <span class="center-stat-num" style="color: #ef4444;" id="statCriticalRooms">1</span>
+              <span class="center-stat-lbl">วิกฤต / ตัวเย็น</span>
+            </div>
+            <div class="center-stat-card turn" onclick="setRoomFilter('turn')">
+              <span class="center-stat-num" style="color: #3b82f6;" id="statTurnDueRooms">1</span>
+              <span class="center-stat-lbl">ต้องพลิกตัว</span>
+            </div>
+          </div>
+
+          <!-- Room Search Bar (ค้นหาห้องพัก/ผู้สูงอายุ/HN/โรคประจำตัว) -->
+          <div class="search-bar-container">
+            <div class="search-input-wrapper">
+              <span class="search-icon">🔍</span>
+              <input 
+                type="text" 
+                id="roomSearchInput" 
+                class="room-search-input" 
+                placeholder="พิมพ์ค้นหา... หมายเลขห้อง (เช่น 101), ชื่อผู้สูงอายุ, รหัส HN หรือโรคประจำตัว (เช่น เบาหวาน, ติดเตียง)"
+                oninput="handleRoomSearch(this.value)"
+                autocomplete="off"
+              >
+              <button id="btnClearSearch" class="btn-clear-search" onclick="clearRoomSearch()" style="display: none;" title="ล้างการค้นหา">✕</button>
+            </div>
+            <div id="searchResultSummary" class="search-result-badge" style="display: none;"></div>
+          </div>
+
+          <!-- Rooms Toolbar & Filters -->
+          <div class="rooms-toolbar">
+            <div class="room-filters-scroll">
+              <button class="filter-pill active" id="filter-all" onclick="setRoomFilter('all')">🏢 ทุกห้อง (<span id="countAll">6</span>)</button>
+              <button class="filter-pill alert-pill" id="filter-alert" onclick="setRoomFilter('alert')">🚨 ต้องดูแลด่วน (<span id="countAlert">2</span>)</button>
+              <button class="filter-pill turn-pill" id="filter-turn" onclick="setRoomFilter('turn')">🔄 ถึงเวลาพลิกตัว (<span id="countTurn">1</span>)</button>
+              <button class="filter-pill" id="filter-med" onclick="setRoomFilter('med')">💊 มียาค้างทาน (<span id="countMed">2</span>)</button>
+              <button class="filter-pill" id="filter-bedridden" onclick="setRoomFilter('bedridden')">🛌 ผู้ป่วยติดเตียง (<span id="countBedridden">3</span>)</button>
+            </div>
+            <button class="btn btn-primary" style="padding: 6px 14px; font-size: 0.8rem; white-space: nowrap;" onclick="openAddRoomModal()">
+              + เพิ่มห้องพัก
+            </button>
+          </div>
+
+          <!-- The Rooms Grid -->
+          <div class="rooms-grid" id="elderlyRoomsGrid">
+            <!-- Rendered dynamically by JavaScript -->
+          </div>
+
+        </div>
+
+        <!-- ========================================================== -->
+        <!-- CHILD CARE VIEW (โหมดดูแลเด็กเล็ก)                           -->
+        <!-- ========================================================== -->
+        <div id="childHomeWidgets" style="display: none; max-width: 680px; margin: 0 auto;">
+          
+          <!-- Emergency Speed-Dial Card -->
+          <div class="emergency-card">
+            <div class="emergency-info">
+              <span class="emergency-icon">🚨</span>
+              <div>
+                <div class="emergency-title">สายด่วนกุมารแพทย์ฉุกเฉิน 1669</div>
+                <div class="emergency-sub">กดโทรออกทันทีหากน้องมีอาการชักเกร็ง ซึม หรือหายใจหอบ</div>
+              </div>
+            </div>
+            <a href="tel:1669" class="btn-emergency">
+              <span>📞 โทรด่วน 1669</span>
+            </a>
+          </div>
+
+          <!-- Hero Temperature Card (Child) -->
+          <div class="hero-card normal" id="heroCardChild">
+            <div class="hero-temp-row">
+              <span class="hero-temp-val" id="childHeroTemp">37.0</span>
+              <span class="hero-temp-unit">°C</span>
+            </div>
+
+            <div>
+              <div class="status-badge normal" id="childHeroStatusBadge">
+                <span>●</span> <span id="childHeroStatusText">สบายดี อุณหภูมิปกติ</span>
+              </div>
+            </div>
+
+            <!-- Gauge bar -->
+            <div class="thermo-bar-wrapper">
+              <div class="thermo-bar-track">
+                <div class="thermo-bar-fill" id="childThermoFill" style="width: 40%; background: var(--temp-normal);"></div>
+              </div>
+              <div class="thermo-markers">
+                <span>36.0° ปกติ</span>
+                <span>37.0° สบายดี</span>
+                <span>37.5° ไข้ต่ำ</span>
+                <span>38.5° ไข้สูง</span>
+              </div>
+            </div>
+
+            <div class="hero-stats-strip">
+              <div class="stat-item">
+                <span>สูงสุดวันนี้</span>
+                <span class="stat-val" id="childStatMaxTemp">37.2°C</span>
+              </div>
+              <div class="stat-item">
+                <span>ต่ำสุดวันนี้</span>
+                <span class="stat-val" id="childStatMinTemp">36.8°C</span>
+              </div>
+              <div class="stat-item">
+                <span>อัปเดตล่าสุด</span>
+                <span class="stat-val">เมื่อสักครู่</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Smart Care Advice Box (Child) -->
+          <div class="advice-box" id="childAdviceBox">
+            <div class="advice-icon">💡</div>
+            <div class="advice-content">
+              <div class="advice-title" id="childAdviceTitle">หนูสบายดี อุณหภูมิปกติ</div>
+              <div class="advice-desc" id="childAdviceDesc">
+                ให้น้องดื่มน้ำหรือนมตามปกติ สวมใส่เสื้อผ้าโปร่งสบาย ระบายอากาศได้ดี หากน้องเริ่มตัวอุ่นให้หมั่นสังเกตอาการค่ะ
+              </div>
+            </div>
+          </div>
+
+          <!-- Pediatric 4-Hour Medication Timer -->
+          <div class="ped-timer-card">
+            <div style="flex: 1;">
+              <span style="font-size: 0.72rem; font-weight: 800; color: var(--primary); text-transform: uppercase;">⏰ การดูแลยาพาราฯ เด็ก</span>
+              <div style="font-size: 1rem; font-weight: 800; color: #0f172a; margin: 2px 0;" id="childMedTimerTitle">พร้อมป้อนยาหากมีไข้สูง</div>
+              <div style="font-size: 0.78rem; color: #64748b;" id="childMedTimerSub">ไม่ควรให้ยาพาราฯ ถี่กว่าทุก 4 ชั่วโมง</div>
+            </div>
+
+            <div class="timer-circle-widget">
+              <svg viewBox="0 0 72 72">
+                <circle class="timer-circle-bg" cx="36" cy="36" r="30"></circle>
+                <circle class="timer-circle-bar" id="childTimerCircleBar" cx="36" cy="36" r="30"></circle>
+              </svg>
+              <div class="timer-center-text" id="childTimerText">พร้อม</div>
+            </div>
+          </div>
+
+          <!-- Quick Paracetamol Dose Card -->
+          <div class="vitals-card">
+            <div class="card-header-row">
+              <div class="card-header-title">
+                <span>💊 ขนาดยาพาราฯ ของน้อง</span>
+              </div>
+              <button class="btn btn-outline" style="padding: 4px 10px; font-size: 0.75rem;" onclick="switchTab('meds')">
+                คำนวณละเอียด →
+              </button>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: var(--radius-md); padding: 12px 16px;">
+              <div>
+                <div style="font-size: 0.8rem; color: #166534; font-weight: 700;">น้ำหนัก <span id="quickDoseWeight">10.0</span> กก. (สูตร 120 mg / 5 ml)</div>
+                <div style="font-size: 1.4rem; font-weight: 800; color: #15803d;" id="quickDoseValue">1 ช้อนชา (5.0 ml)</div>
+              </div>
+              <button class="btn btn-primary" style="padding: 8px 14px; font-size: 0.82rem;" onclick="quickLogChildMed()">
+                ป้อนยาแล้ว
+              </button>
+            </div>
+          </div>
+
+          <!-- Child Quick Actions -->
+          <div class="quick-actions-card">
+            <div class="card-header-row" style="margin-bottom: 6px;">
+              <div class="card-header-title">
+                <span>⚡ บันทึกการดูแลเด็ก</span>
+              </div>
+              <span style="font-size: 0.75rem; color: var(--primary); font-weight: 700; cursor: pointer;" onclick="switchTab('logs')">
+                ดูประวัติทั้งหมด →
+              </span>
+            </div>
+            <div class="action-grid">
+              <button class="btn-quick-action" onclick="quickLogChildMed()">
+                <span class="action-icon">💊</span>
+                <span class="action-text">ป้อนยาแล้ว</span>
+              </button>
+              <button class="btn-quick-action" onclick="quickLogChildAction('sponge', 'เช็ดตัวลดไข้')">
+                <span class="action-icon">🧽</span>
+                <span class="action-text">เช็ดตัวลดไข้</span>
+              </button>
+              <button class="btn-quick-action" onclick="quickLogChildAction('milk', 'ดื่มนม/น้ำ')">
+                <span class="action-icon">🍼</span>
+                <span class="action-text">นม / ดื่มน้ำ</span>
+              </button>
+              <button class="btn-quick-action" onclick="quickLogChildAction('symptom', 'จดอาการ')">
+                <span class="action-icon">🩺</span>
+                <span class="action-text">จดอาการ</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Child Temperature Trend Chart -->
+          <div class="chart-card">
+            <div class="chart-header">
+              <div class="card-header-title">
+                <span>📈 แนวโน้มอุณหภูมิน้อง</span>
+              </div>
+              <div class="chart-pills">
+                <button class="btn-chart-range active" onclick="changeChartRange(6, this)">6 ชม.</button>
+                <button class="btn-chart-range" onclick="changeChartRange(12, this)">12 ชม.</button>
+                <button class="btn-chart-range" onclick="changeChartRange(24, this)">24 ชม.</button>
+              </div>
+            </div>
+            <div class="chart-wrapper">
+              <canvas id="childTempChart"></canvas>
+            </div>
+          </div>
+
+        </div>
+
+      </section>
+
+      <!-- ============================================================== -->
+      <!-- TAB 2: MEDS & SCHEDULE (ตารางยา)                                -->
+      <!-- ============================================================== -->
+      <section id="tab-meds" class="tab-content">
+        
+        <!-- Elderly Meds Overview -->
+        <div id="elderlyMedsView">
+          <div class="med-card">
+            <div class="card-header-row">
+              <div class="card-header-title">
+                <span>💊 ตารางยาประจำวันตามห้องพักผู้สูงอายุ</span>
+              </div>
+              <button class="btn btn-outline" style="padding: 4px 10px; font-size: 0.75rem;" onclick="filterRoomsMedsDue()">
+                แสดงเฉพาะห้องที่ยังไม่ได้ทานยา
+              </button>
+            </div>
+            <p style="font-size: 0.8rem; color: #64748b; margin-bottom: 12px;">
+              เลือกห้องพักเพื่อจัดการและเช็คอินการรับประทานยาตามมื้อ (เช้า, กลางวัน, เย็น, ก่อนนอน)
+            </p>
+
+            <div class="search-input-wrapper" style="margin-bottom: 12px; border-radius: var(--radius-md); padding: 6px 12px;">
+              <span class="search-icon" style="font-size: 0.95rem;">🔍</span>
+              <input 
+                type="text" 
+                id="medSearchInput" 
+                class="room-search-input" 
+                placeholder="ค้นหาห้อง หรือชื่อยา (เช่น Amlodipine, 101, ยาเบาหวาน, ยาลดไขมัน)..." 
+                oninput="handleMedSearch(this.value)"
+              >
+            </div>
+
+            <div id="elderlyCenterMedsList">
+              <!-- Rendered via JavaScript -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Child Calculator -->
+        <div id="childMedsView" style="display: none; max-width: 680px; margin: 0 auto;">
+          <div class="calc-card">
+            <div class="card-header-title" style="margin-bottom: 8px;">
+              <span>🧮 คำนวณยาพาราเซตามอลเด็ก (ตามน้ำหนัก)</span>
+            </div>
+            <p style="font-size: 0.82rem; color: #64748b; margin-bottom: 16px;">
+              คำนวณตามมาตรฐานกรมการแพทย์ กระทรวงสาธารณสุข (10 - 15 มก./กก./ครั้ง) ไม่เกินวันละ 5 ครั้ง
+            </p>
+
+            <div class="form-group">
+              <label class="form-label">น้ำหนักตัวน้อง (กิโลกรัม):</label>
+              <input type="number" step="0.1" min="2" max="60" id="calcChildWeight" class="form-input" value="10.0" oninput="calculatePediatricParacetamol()">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">ชนิดและความเข้มข้นของยา:</label>
+              <select id="calcChildFormula" class="form-input" onchange="calculatePediatricParacetamol()">
+                <option value="120">ยาน้ำเชื่อม 120 มก. / 5 มล. (สูตรมาตรฐานเด็กเล็ก)</option>
+                <option value="250">ยาน้ำเชื่อม 250 มก. / 5 มล. (สูตรเด็กโต / Forte)</option>
+                <option value="100">ยาหยด Drops 100 มก. / 1 มล. (สูตรทารกแรกเกิด)</option>
+              </select>
+            </div>
+
+            <div class="calc-result-box">
+              <div style="font-size: 0.85rem; font-weight: 700; color: #166534;">ขนาดยาที่ควรได้รับต่อครั้ง:</div>
+              <div class="calc-result-number" id="calcResultDisplay">1 ช้อนชา (5.0 ml)</div>
+              <div class="calc-result-sub" id="calcResultDoseRange">ขนาดยาพาราเซตามอล: 100 - 150 มิลลิกรัม</div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ============================================================== -->
+      <!-- TAB 3: GUIDE (คู่มือและสัญญาณอันตราย)                         -->
+      <!-- ============================================================== -->
+      <section id="tab-guide" class="tab-content">
+        <div style="max-width: 800px; margin: 0 auto;">
+          <div style="margin-bottom: 14px;">
+            <h3 style="font-size: 1.15rem; font-weight: 800; color: #0f172a;">คู่มือการดูแลผู้สูงอายุ & เด็กเล็ก</h3>
+            <p style="font-size: 0.82rem; color: #64748b;">แนวทางมาตรฐานสำหรับศูนย์ดูแลผู้สูงอายุและครอบครัว</p>
+          </div>
+
+          <!-- FAST Stroke Card -->
+          <div class="redflag-card">
+            <div class="redflag-title">
+              <span>🧠 อาการเตือนโรคหลอดเลือดสมอง (FAST) ในผู้สูงอายุ - รีบส่ง รพ. ทันที!</span>
+            </div>
+            <ul class="redflag-list">
+              <li><strong>F - Face:</strong> หน้าเบี้ยว ปากเบี้ยว ยิ้มแล้วมุมปากตกข้างหนึ่ง</li>
+              <li><strong>A - Arms:</strong> แขนขาอ่อนแรง ยกแขนสองข้างแล้วตกหนึ่งข้าง</li>
+              <li><strong>S - Speech:</strong> พูดไม่ชัด พูดไม่ออก หรือฟังไม่เข้าใจภาษา</li>
+              <li><strong>T - Time:</strong> รีบโทร 1669 ทันที ต้องถึง รพ. ภายใน 4.5 ชั่วโมง</li>
+            </ul>
+          </div>
+
+          <!-- Sepsis Card -->
+          <div class="redflag-card">
+            <div class="redflag-title">
+              <span>🩸 สัญญาณภาวะติดเชื้อรุนแรงในกระแสเลือด (Sepsis)</span>
+            </div>
+            <ul class="redflag-list">
+              <li>อุณหภูมิร่างกายสูงเกิน 37.8°C หรือตัวเย็นผิดปกติ (&lt;35.5°C) หนาวสั่น</li>
+              <li>หายใจหอบเร็ว ชีพจรเต้นเร็วมาก หรือความดันตกผิดปกติ</li>
+              <li>ซึมลง สับสนเฉียบพลัน เพ้อ ไม่รู้เวลาและสถานที่</li>
+              <li>ปัสสาวะออกน้อยมาก ปัสสาวะมีสีเข้มหรือขุ่นมีกลิ่นฉุน</li>
+            </ul>
+          </div>
+
+          <!-- Bedridden Care Card -->
+          <div class="vitals-card">
+            <div class="card-header-title" style="margin-bottom: 8px;">
+              <span>🛏️ เทคนิคการดูแลผู้สูงอายุติดเตียง ป้องกันแผลกดทับ</span>
+            </div>
+            <ul style="padding-left: 20px; font-size: 0.85rem; color: #334155; line-height: 1.6;">
+              <li><strong>พลิกตัวสม่ำเสมอ:</strong> สลับท่านอนทุก 2 ชั่วโมง (หงาย ➔ ตะแคงขวา 30° ➔ หงาย ➔ ตะแคงซ้าย 30°)</li>
+              <li><strong>การนอนตะแคง:</strong> เอียงตัวประมาณ 30 องศา ใช้หมอนรองหลังและระหว่างหัวเข่า ป้องกันกระดูกกดทับกัน</li>
+              <li><strong>ดูแลผิวหนัง:</strong> รักษาผิวหนังให้สะอาดและแห้ง ไม่อับชื้น ทาโลชั่นบำรุงผิว</li>
+            </ul>
+          </div>
+
+          <!-- Child Tepid Sponge Card -->
+          <div class="vitals-card">
+            <div class="card-header-title" style="margin-bottom: 8px;">
+              <span>🧽 ขั้นตอนการเช็ดตัวลดไข้เด็กอย่างถูกวิธี (Tepid Sponge)</span>
+            </div>
+            <ol style="padding-left: 20px; font-size: 0.85rem; color: #334155; line-height: 1.6;">
+              <li>เตรียมน้ำอุ่นหรือน้ำอุณหภูมิห้อง (ห้ามใช้น้ำแข็งหรือแอลกอฮอล์)</li>
+              <li>เช็ดลูบเข้าหาหัวใจจากปลายมือปลายเท้าเพื่อเปิดรูขุมขนระบายความร้อน</li>
+              <li>วางพักผ้าตามจุดระบายความร้อน ซอกคอ รักแร้ ขาหนีบ</li>
+              <li>หากเด็กหนาวสั่น ให้หยุดเช็ดตัวทันทีและซับตัวให้แห้ง</li>
+            </ol>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================== -->
+      <!-- TAB 4: LOGS & REPORTS (ประวัติและรายงาน)                         -->
+      <!-- ============================================================== -->
+      <section id="tab-logs" class="tab-content">
+        <div style="max-width: 900px; margin: 0 auto;">
+          
+          <!-- Doctor / Family Report Card -->
+          <div class="vitals-card">
+            <div class="card-header-row">
+              <div class="card-header-title">
+                <span>📋 สรุปรายงานสำหรับส่งต่อแพทย์ / ญาติผู้ป่วย (LINE)</span>
+              </div>
+              <button class="btn btn-primary" style="padding: 4px 12px; font-size: 0.78rem;" onclick="copyDoctorReport()">
+                📲 คัดลอกส่ง LINE
+              </button>
+            </div>
+            <div style="margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 0.8rem; font-weight: 700; color: #334155;">เลือกห้องที่ต้องการสรุป:</span>
+              <select id="reportRoomSelect" class="form-input" style="width: auto; padding: 4px 8px; font-size: 0.8rem;" onchange="updateDoctorReport()">
+                <!-- Populated by JS -->
+              </select>
+            </div>
+            <textarea id="doctorReportPreview" class="report-preview-box" readonly></textarea>
+            
+            <div style="display: flex; gap: 8px; margin-top: 8px;">
+              <button class="btn btn-outline" style="flex: 1; font-size: 0.8rem;" onclick="exportCenterExcel()">
+                📊 ส่งออก Excel ทุกห้อง (.xls)
+              </button>
+              <button class="btn btn-outline" style="flex: 1; font-size: 0.8rem;" onclick="exportCenterCsv()">
+                📄 ส่งออก CSV ทุกห้อง
+              </button>
+            </div>
+          </div>
+
+          <!-- Activity Timeline -->
+          <div class="vitals-card">
+            <div class="card-header-row">
+              <div class="card-header-title">
+                <span>🕒 บันทึกกิจกรรมการดูแลของศูนย์วันนี้</span>
+              </div>
+              <button class="btn btn-outline" style="padding: 2px 8px; font-size: 0.72rem;" onclick="clearCenterLogs()">
+                ล้างประวัติ
+              </button>
+            </div>
+            <div class="search-input-wrapper" style="margin-bottom: 12px; border-radius: var(--radius-md); padding: 6px 12px;">
+              <span class="search-icon" style="font-size: 0.95rem;">🔍</span>
+              <input 
+                type="text" 
+                id="logSearchInput" 
+                class="room-search-input" 
+                placeholder="ค้นหาบันทึกกิจกรรม... (เช่น 101, พลิกตัว, ดื่มน้ำ, สัญญาณชีพ, ยา)" 
+                oninput="handleLogSearch(this.value)"
+              >
+            </div>
+            <div id="careLogsContainer">
+              <!-- Rendered via JavaScript -->
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ============================================================== -->
+      <!-- TAB 5: SETTINGS (การตั้งค่า)                                   -->
+      <!-- ============================================================== -->
+      <section id="tab-settings" class="tab-content">
+        <div style="max-width: 680px; margin: 0 auto;">
+          <div class="calc-card">
+            <div class="card-header-title" style="margin-bottom: 12px;">
+              <span>⚙️ ตั้งค่าระบบศูนย์ดูแลและอุปกรณ์ ESP32</span>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">โหมดการใช้งานปัจจุบัน:</label>
+              <select id="settingCareMode" class="form-input" onchange="switchCareMode(this.value)">
+                <option value="elderly">🏢 ศูนย์ดูแลผู้สูงอายุ (Elderly Care Center - แบ่งห้อง)</option>
+                <option value="child">👶 ดูแลเด็กเล็ก (Child Care)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">เบอร์โทรศัพท์ฉุกเฉินประจำศูนย์ (SOS):</label>
+              <input type="text" id="settingEmergencyPhone" class="form-input" value="1669">
+            </div>
+
+            <hr style="border: none; border-top: 1px dashed var(--border); margin: 18px 0;">
+
+            <div class="card-header-title" style="margin-bottom: 12px; font-size: 0.95rem;">
+              <span>☁️ เชื่อมต่อ Firebase Realtime Database</span>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Firebase RTDB URL:</label>
+              <input type="text" id="settingFirebaseUrl" class="form-input" placeholder="https://your-database.firebasedatabase.app">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">เกณฑ์แจ้งเตือนไข้สูง (°C):</label>
+              <input type="number" step="0.1" id="settingAlertThreshold" class="form-input" value="37.8">
+            </div>
+
+            <button class="btn btn-primary btn-block" onclick="saveSettings()">
+              💾 บันทึกการตั้งค่า
+            </button>
+          </div>
+
+          <div style="text-align: center; margin-top: 16px; font-size: 0.78rem; color: #94a3b8;">
+            CareTemp 24 • ระบบศูนย์ดูแลผู้สูงอายุและเด็ก v2.0<br>
+            <a href="../index.html" style="color: var(--primary); font-weight: 700; text-decoration: none;">← กลับสู่หน้าหลักเลือกระบบ (Hub)</a>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Bottom Navigation Bar -->
+    <nav class="bottom-nav">
+      <button class="nav-tab-btn active" id="nav-home" onclick="switchTab('home')">
+        <span class="nav-tab-icon">🏢</span>
+        <span class="nav-tab-label" id="navLabelHome">ห้องพัก</span>
+      </button>
+      <button class="nav-tab-btn" id="nav-meds" onclick="switchTab('meds')">
+        <span class="nav-tab-icon">💊</span>
+        <span class="nav-tab-label" id="navLabelMeds">ตารางยา</span>
+      </button>
+      <button class="nav-tab-btn" id="nav-guide" onclick="switchTab('guide')">
+        <span class="nav-tab-icon">📖</span>
+        <span class="nav-tab-label">คู่มือดูแล</span>
+      </button>
+      <button class="nav-tab-btn" id="nav-logs" onclick="switchTab('logs')">
+        <span class="nav-tab-icon">📋</span>
+        <span class="nav-tab-label">รายงาน</span>
+      </button>
+      <button class="nav-tab-btn" id="nav-settings" onclick="switchTab('settings')">
+        <span class="nav-tab-icon">⚙️</span>
+        <span class="nav-tab-label">ตั้งค่า</span>
+      </button>
+    </nav>
+
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- MODAL: ROOM DETAIL VIEW (หน้าต่างจัดการห้องเดี่ยวแบบละเอียด)       -->
+  <!-- ============================================================== -->
+  <div class="modal-overlay" id="modalRoomDetail">
+    <div class="modal-box large">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span class="room-number-badge" id="modalRoomNo" style="font-size: 1rem; padding: 4px 10px;">ห้อง 101</span>
+          <h3 class="modal-title" id="modalResidentName">คุณยายสมศรี ใจดี</h3>
+        </div>
+        <button class="btn-close-modal" onclick="closeRoomDetailModal()">✕</button>
+      </div>
+
+      <!-- Room Header Info Strip -->
+      <div class="room-modal-header-strip">
+        <div>
+          <span id="modalResidentAge" style="font-weight: 700;">อายุ 76 ปี</span> • 
+          <span id="modalResidentHn" style="color: var(--text-muted);">HN-00482</span> • 
+          <span id="modalResidentWeight">52.0 กก.</span>
+          <div id="modalResidentCondition" style="font-size: 0.75rem; color: #b45309; font-weight: 600; margin-top: 2px;">
+            โรคประจำตัว: ความดันโลหิตสูง, ผู้ป่วยติดเตียง
+          </div>
+        </div>
+        <div style="text-align: right;">
+          <span id="modalCareLevelTag" class="care-level-tag bedridden">ติดเตียง 100%</span>
+          <div id="modalDeviceBattery" style="font-size: 0.75rem; color: #15803d; font-weight: 700; margin-top: 2px;">
+            📡 baby1 | 🔋 98%
+          </div>
+        </div>
+      </div>
+
+      <!-- Hero Temp Card for This Room -->
+      <div class="hero-card normal" id="modalHeroCard" style="padding: 16px; margin-bottom: 12px;">
+        <div class="hero-temp-row">
+          <span class="hero-temp-val" id="modalHeroTemp" style="font-size: 3.2rem;">36.8</span>
+          <span class="hero-temp-unit">°C</span>
+        </div>
+        <div class="status-badge normal" id="modalStatusBadge">
+          <span>●</span> <span id="modalStatusText">สบายดี อุณหภูมิปกติ</span>
+        </div>
+        <div id="modalAdviceText" style="font-size: 0.8rem; color: #475569; margin-top: 4px;">
+          ผู้สูงอายุสบายดี ให้ดื่มน้ำและสังเกตอาการต่อเนื่อง
+        </div>
+      </div>
+
+      <!-- Vitals Strip for This Room -->
+      <div class="vitals-card" style="margin-bottom: 12px;">
+        <div class="card-header-row">
+          <div class="card-header-title" style="font-size: 0.95rem;">
+            <span>🫀 สัญญาณชีพล่าสุด</span>
+          </div>
+          <button class="btn btn-outline" style="padding: 2px 8px; font-size: 0.72rem;" onclick="openVitalsModal()">
+            + อัปเดตค่าใหม่
+          </button>
+        </div>
+        <div class="vitals-grid">
+          <div class="vital-tile">
+            <div class="vital-label">ความดัน (BP)</div>
+            <div class="vital-value" id="modalValBp" style="font-size: 1.1rem;">122/78</div>
+            <div class="vital-unit">mmHg</div>
+          </div>
+          <div class="vital-tile">
+            <div class="vital-label">ชีพจร (Pulse)</div>
+            <div class="vital-value" id="modalValHr" style="font-size: 1.1rem;">74</div>
+            <div class="vital-unit">bpm</div>
+          </div>
+          <div class="vital-tile">
+            <div class="vital-label">ออกซิเจน (SpO2)</div>
+            <div class="vital-value" id="modalValSpo2" style="font-size: 1.1rem;">98</div>
+            <div class="vital-unit">%</div>
+          </div>
+          <div class="vital-tile">
+            <div class="vital-label">น้ำตาล (DTX)</div>
+            <div class="vital-value" id="modalValGlucose" style="font-size: 1.1rem;">110</div>
+            <div class="vital-unit">mg/dL</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2-Hour Bedridden Turn Schedule for This Room -->
+      <div class="turn-card" style="margin-bottom: 12px; padding: 14px;">
+        <div class="card-header-row">
+          <div class="card-header-title" style="font-size: 0.95rem;">
+            <span>🔄 การพลิกตัวป้องกันแผลกดทับ</span>
+          </div>
+          <span style="font-size: 0.75rem; color: #2563eb; font-weight: 700;">รอบ 2 ชม.</span>
+        </div>
+        <div class="turn-display-row">
+          <div class="turn-circle" style="width: 60px; height: 60px;">
+            <div class="turn-timer-text" id="modalTurnTimer" style="font-size: 0.85rem;">01:25</div>
+            <div class="turn-timer-sub">เหลือ</div>
+          </div>
+          <div class="turn-info">
+            <div style="font-size: 0.75rem; color: var(--text-muted);">ท่าปัจจุบัน:</div>
+            <div class="turn-position-name" id="modalTurnCurrentPos" style="font-size: 1rem;">นอนหงาย</div>
+            <div class="turn-next-hint" id="modalTurnNextPos">ท่าถัดไป: ตะแคงขวา 30°</div>
+          </div>
+          <button class="btn btn-primary" style="padding: 6px 12px; font-size: 0.78rem;" onclick="recordActiveRoomTurn()">
+            ✔ พลิกตัวแล้ว
+          </button>
+        </div>
+      </div>
+
+      <!-- Meal Medications Checklist for This Room -->
+      <div class="med-card" style="margin-bottom: 12px; padding: 14px;">
+        <div class="card-header-row">
+          <div class="card-header-title" style="font-size: 0.95rem;">
+            <span>💊 ยาประจำตัวประจำห้องนี้</span>
+          </div>
+          <button class="btn btn-outline" style="padding: 2px 8px; font-size: 0.72rem;" onclick="openAddMedModal()">
+            + เพิ่มยา
+          </button>
+        </div>
+        <div id="modalMedListContainer">
+          <!-- Rendered via JS -->
+        </div>
+      </div>
+
+      <!-- Hydration for This Room -->
+      <div class="vitals-card" style="margin-bottom: 12px; padding: 14px;">
+        <div class="card-header-row">
+          <div class="card-header-title" style="font-size: 0.95rem;">
+            <span>💧 ดื่มน้ำวันนี้</span>
+          </div>
+          <span id="modalHydrationLabel" style="font-size: 0.8rem; font-weight: 700; color: #0284c7;">1,250 / 2,000 ml</span>
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <button class="btn btn-outline" style="flex: 1; padding: 6px; font-size: 0.75rem;" onclick="addActiveRoomWater(150)">+150 ml</button>
+          <button class="btn btn-outline" style="flex: 1; padding: 6px; font-size: 0.75rem;" onclick="addActiveRoomWater(250)">+250 ml</button>
+          <button class="btn btn-outline" style="flex: 1; padding: 6px; font-size: 0.75rem;" onclick="addActiveRoomWater(500)">+500 ml</button>
+        </div>
+      </div>
+
+      <!-- Temperature Trend Chart for This Room -->
+      <div class="chart-card" style="margin-bottom: 12px; padding: 14px;">
+        <div class="card-header-title" style="font-size: 0.95rem; margin-bottom: 8px;">
+          <span>📈 แนวโน้มอุณหภูมิห้องนี้</span>
+        </div>
+        <div class="chart-wrapper" style="height: 180px;">
+          <canvas id="modalRoomChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Modal Footer Action Buttons -->
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <button class="btn btn-primary" style="flex: 1;" onclick="shareActiveRoomDoctorReport()">
+          📲 ส่งรายงาน LINE ของห้องนี้
+        </button>
+        <button class="btn btn-outline" style="flex: 1;" onclick="openEditRoomModal()">
+          ✏️ แก้ไขข้อมูลห้อง
+        </button>
+        <button class="btn btn-outline" style="color: #dc2626;" onclick="deleteActiveRoom()">
+          🗑️ จำหน่าย/ลบห้อง
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- MODAL: ADD NEW ROOM (เพิ่มห้องพักศูนย์ผู้สูงอายุ)                -->
+  <!-- ============================================================== -->
+  <div class="modal-overlay" id="modalAddRoom">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">🏢 เพิ่มห้องพักผู้สูงอายุใหม่</h3>
+        <button class="btn-close-modal" onclick="closeAddRoomModal()">✕</button>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">หมายเลขห้องพัก (เช่น ห้อง 107):</label>
+        <input type="text" id="addRoomNo" class="form-input" placeholder="เช่น ห้อง 107">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">ชื่อ - นามสกุล ผู้สูงอายุ:</label>
+        <input type="text" id="addRoomResidentName" class="form-input" placeholder="เช่น คุณยายสมปอง ผ่องใส">
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+        <div class="form-group">
+          <label class="form-label">อายุ:</label>
+          <input type="text" id="addRoomAge" class="form-input" placeholder="เช่น 75 ปี" value="75 ปี">
+        </div>
+        <div class="form-group">
+          <label class="form-label">รหัส HN:</label>
+          <input type="text" id="addRoomHn" class="form-input" placeholder="เช่น HN-00701">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">ระดับการดูแล (Care Level):</label>
+        <select id="addRoomCareLevel" class="form-input">
+          <option value="bedridden">🛌 ผู้ป่วยติดเตียง 100% (ต้องการพลิกตัวทุก 2 ชม.)</option>
+          <option value="semi">🦯 กึ่งติดเตียง (ช่วยเหลือตัวเองได้บางส่วน)</option>
+          <option value="self">🚶 ช่วยเหลือตัวเองได้ดี</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">โรคประจำตัว / ข้อควรระวังพิเศษ:</label>
+        <input type="text" id="addRoomCondition" class="form-input" placeholder="เช่น เบาหวาน, ความดันสูง, โรคไต">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">ESP32 Device ID / Sensor Name:</label>
+        <input type="text" id="addRoomDeviceId" class="form-input" placeholder="เช่น elderly7 หรือ baby1" value="elderly7">
+      </div>
+
+      <button class="btn btn-primary btn-block" onclick="saveNewRoom()">
+        💾 บันทึกและเปิดห้องพักใหม่
+      </button>
+    </div>
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- MODAL: ADD / UPDATE VITALS                                     -->
+  <!-- ============================================================== -->
+  <div class="modal-overlay" id="modalVitals">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">🫀 บันทึกค่าสัญญาณชีพ</h3>
+        <button class="btn-close-modal" onclick="closeVitalsModal()">✕</button>
+      </div>
+      <div class="form-group">
+        <label class="form-label">ความดันโลหิต ตัวบน/ตัวล่าง (SYS/DIA mmHg):</label>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <input type="number" id="inputBpSys" class="form-input" placeholder="SYS (เช่น 120)" value="122">
+          <input type="number" id="inputBpDia" class="form-input" placeholder="DIA (เช่น 80)" value="78">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">อัตราการเต้นหัวใจ / ชีพจร (Pulse bpm):</label>
+        <input type="number" id="inputHr" class="form-input" placeholder="เช่น 74" value="74">
+      </div>
+      <div class="form-group">
+        <label class="form-label">ออกซิเจนปลายนิ้ว (SpO2 %):</label>
+        <input type="number" id="inputSpo2" class="form-input" placeholder="เช่น 98" value="98">
+      </div>
+      <div class="form-group">
+        <label class="form-label">ระดับน้ำตาลในเลือด (DTX mg/dL):</label>
+        <input type="number" id="inputGlucose" class="form-input" placeholder="เช่น 110" value="110">
+      </div>
+      <button class="btn btn-primary btn-block" onclick="saveVitalsModal()">
+        💾 บันทึกข้อมูลสัญญาณชีพ
+      </button>
+    </div>
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- MODAL: ADD NEW MEDICATION                                      -->
+  <!-- ============================================================== -->
+  <div class="modal-overlay" id="modalAddMed">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">💊 เพิ่มรายการยาประจำตัว</h3>
+        <button class="btn-close-modal" onclick="closeAddMedModal()">✕</button>
+      </div>
+      <div class="form-group">
+        <label class="form-label">ชื่อยา:</label>
+        <input type="text" id="inputMedName" class="form-input" placeholder="เช่น Amlodipine 5mg (ยาลดความดัน)">
+      </div>
+      <div class="form-group">
+        <label class="form-label">มื้อที่ต้องรับประทาน:</label>
+        <select id="inputMedMeal" class="form-input">
+          <option value="morning">🌅 ตอนเช้า (หลังอาหาร)</option>
+          <option value="noon">☀️ ตอนกลางวัน (หลังอาหาร)</option>
+          <option value="evening">🌆 ตอนเย็น (หลังอาหาร)</option>
+          <option value="bedtime">🌙 ก่อนนอน</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">ขนาดและวิธีรับประทาน:</label>
+        <input type="text" id="inputMedDoseDesc" class="form-input" placeholder="เช่น 1 เม็ด หลังอาหารทันที">
+      </div>
+      <button class="btn btn-primary btn-block" onclick="saveNewMed()">
+        💾 บันทึกยาใหม่
+      </button>
+    </div>
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- MODAL: SIMULATION / DEMO MODE                                  -->
+  <!-- ============================================================== -->
+  <div class="modal-overlay" id="modalSimulation">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">🧪 โหมดทดสอบการวัดค่า (Simulation)</h3>
+        <button class="btn-close-modal" onclick="closeSimulationModal()">✕</button>
+      </div>
+      <p style="font-size: 0.85rem; color: #64748b; margin-bottom: 14px;">
+        คุณสามารถทดลองเปลี่ยนค่าอุณหภูมิของห้องที่เลือกเพื่อทดสอบระบบการแจ้งเตือน ไซเรน และสีของหน้าจอ
+      </p>
+
+      <div class="form-group">
+        <label class="form-label">เลือกสถานะอุณหภูมิทดสอบ:</label>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <button class="btn btn-outline" onclick="setSimTemp(35.2)">🥶 ตัวเย็นวิกฤต (35.2°C)</button>
+          <button class="btn btn-outline" onclick="setSimTemp(36.8)">🟢 ปกติ (36.8°C)</button>
+          <button class="btn btn-outline" onclick="setSimTemp(37.5)">🟡 ไข้ต่ำ (37.5°C)</button>
+          <button class="btn btn-outline" onclick="setSimTemp(38.2)">🟠 ไข้สูงติดเชื้อ (38.2°C)</button>
+          <button class="btn btn-outline" style="grid-column: span 2;" onclick="setSimTemp(39.5)">🔴 ไข้วิกฤต (39.5°C)</button>
+        </div>
+      </div>
+
+      <div style="margin-top: 18px; display: flex; gap: 8px;">
+        <button class="btn btn-outline" style="flex: 1;" onclick="setMode('firebase')">
+          สลับเป็น Live Firebase
+        </button>
+        <button class="btn btn-primary" style="flex: 1;" onclick="closeSimulationModal()">
+          ปิดหน้าต่าง
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=2.0"></script>
+</body>
+</html>
